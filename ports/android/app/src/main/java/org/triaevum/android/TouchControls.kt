@@ -415,6 +415,7 @@ class TouchOverlayInput : Native3dsInputTarget {
             val short = minOf(metrics.widthPixels, metrics.heightPixels).toFloat()
             val longPixels = maxOf(metrics.widthPixels, metrics.heightPixels)
             val aspect = longPixels / short
+            InputOverlay.setLayoutReference(editor, "", longPixels.toFloat(), short)
             fun pixelSize(base: Float, size: Float): Int {
                 val percent = Math.round(size / base * 100f - 50f)
                 return (short * (base * (percent + 50f) / 100f)).toInt()

@@ -22,7 +22,6 @@ import android.view.View
 import android.view.View.OnTouchListener
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
-import java.lang.NullPointerException
 import kotlin.math.min
 
 /**
@@ -45,6 +44,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
     // Stores the ID of the pointer that interacted with the 3DS touchscreen.
     private var touchscreenPointerId = -1
     private var gestureActive = false
+    private var layoutReferenceWidth = 1f
+    private var layoutReferenceHeight = 1f
 
     init {
         if (!preferences.getBoolean("OverlayInit", false)) {
@@ -53,9 +54,6 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
         // Reset 3ds touchscreen pointer ID
         touchscreenPointerId = -1
-
-        // Load the controls.
-        refreshControls()
 
         // Set the on touch listener.
         setOnTouchListener(this)
@@ -477,13 +475,13 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         for (id in TouchShortcut.slots) {
             if (EmulationMenuSettings.shortcut(id) != TouchShortcut.OFF) {
                 overlayButtons.add(initializeOverlayButton(
-                    context, R.drawable.button_a, R.drawable.button_a_pressed, id, orientation))
+                    this, R.drawable.button_a, R.drawable.button_a_pressed, id, orientation))
             }
         }
         if (preferences.getBoolean("buttonToggle0", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_a,
                     R.drawable.button_a_pressed,
                     AzaharButtonIds.BUTTON_A,
@@ -494,7 +492,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle1", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_b,
                     R.drawable.button_b_pressed,
                     AzaharButtonIds.BUTTON_B,
@@ -505,7 +503,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle2", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_x,
                     R.drawable.button_x_pressed,
                     AzaharButtonIds.BUTTON_X,
@@ -516,7 +514,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle3", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_y,
                     R.drawable.button_y_pressed,
                     AzaharButtonIds.BUTTON_Y,
@@ -527,7 +525,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle4", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_l,
                     R.drawable.button_l_pressed,
                     AzaharButtonIds.TRIGGER_L,
@@ -538,7 +536,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle5", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_r,
                     R.drawable.button_r_pressed,
                     AzaharButtonIds.TRIGGER_R,
@@ -549,7 +547,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle6", false)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_zl,
                     R.drawable.button_zl_pressed,
                     AzaharButtonIds.BUTTON_ZL,
@@ -560,7 +558,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle7", false)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_zr,
                     R.drawable.button_zr_pressed,
                     AzaharButtonIds.BUTTON_ZR,
@@ -571,7 +569,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle8", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_start,
                     R.drawable.button_start_pressed,
                     AzaharButtonIds.BUTTON_START,
@@ -582,7 +580,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle9", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_select,
                     R.drawable.button_select_pressed,
                     AzaharButtonIds.BUTTON_SELECT,
@@ -593,7 +591,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle10", true)) {
             overlayDpads.add(
                 initializeOverlayDpad(
-                    context,
+                    this,
                     R.drawable.dpad,
                     R.drawable.dpad_pressed_one_direction,
                     R.drawable.dpad_pressed_two_directions,
@@ -608,7 +606,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle11", true)) {
             overlayJoysticks.add(
                 initializeOverlayJoystick(
-                    context,
+                    this,
                     R.drawable.stick_main_range,
                     R.drawable.stick_main,
                     R.drawable.stick_main_pressed,
@@ -620,7 +618,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle12", false)) {
             overlayJoysticks.add(
                 initializeOverlayJoystick(
-                    context,
+                    this,
                     R.drawable.stick_c_range,
                     R.drawable.stick_c,
                     R.drawable.stick_c_pressed,
@@ -636,7 +634,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle14", false)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_swap,
                     R.drawable.button_swap_pressed,
                     AzaharButtonIds.BUTTON_SWAP,
@@ -648,7 +646,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         if (preferences.getBoolean("buttonToggle15", false)) {
             overlayButtons.add(
                 initializeOverlayButton(
-                    context,
+                    this,
                     R.drawable.button_turbo,
                     R.drawable.button_turbo_pressed,
                     AzaharButtonIds.BUTTON_TURBO,
@@ -661,7 +659,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
     private fun addMenuButton(orientation: String) {
         overlayButtons.add(
             initializeOverlayButton(
-                context,
+                this,
                 R.drawable.button_home,
                 R.drawable.button_home_pressed,
                 AzaharButtonIds.BUTTON_HOME,
@@ -671,6 +669,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
     }
 
     fun refreshControls() {
+        if (width <= 0 || height <= 0) return
         cancelTouches()
         // Remove all the overlay buttons from the HashSet.
         overlayButtons.clear()
@@ -682,6 +681,17 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             } else {
                 ""
             }
+
+        // Legacy layouts saved raw pixels. Capture their original display size once
+        // and keep their coordinates in that reference space through future resizes.
+        val widthKey = "TouchLayout$orientation-Width"
+        val heightKey = "TouchLayout$orientation-Height"
+        val metrics = resources.displayMetrics
+        layoutReferenceWidth = preferences.getFloat(widthKey, metrics.widthPixels.toFloat()).coerceAtLeast(1f)
+        layoutReferenceHeight = preferences.getFloat(heightKey, metrics.heightPixels.toFloat()).coerceAtLeast(1f)
+        if (!preferences.contains(widthKey) || !preferences.contains(heightKey)) {
+            setLayoutReference(preferences.edit(), orientation, layoutReferenceWidth, layoutReferenceHeight).apply()
+        }
 
         // Add all the enabled overlay items back to the HashSet.
         if (menuOnly) {
@@ -695,7 +705,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        publishControlBounds()
+        refreshControls()
     }
 
     // TriAevum: where each control is, for a host that draws them. Not while
@@ -711,8 +721,8 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
     private fun saveControlPosition(sharedPrefsId: Int, x: Int, y: Int, orientation: String) {
         preferences.edit()
-            .putFloat("$sharedPrefsId$orientation-X", x.toFloat())
-            .putFloat("$sharedPrefsId$orientation-Y", y.toFloat())
+            .putFloat("$sharedPrefsId$orientation-X", x * layoutReferenceWidth / width)
+            .putFloat("$sharedPrefsId$orientation-Y", y * layoutReferenceHeight / height)
             .apply()
         publishControlBounds()
     }
@@ -771,6 +781,21 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         refreshControls()
     }
 
+    private fun controlPosition(
+        id: Int, orientation: String, controlWidth: Int, controlHeight: Int
+    ): Pair<Int, Int> {
+        val prefix = "$id$orientation"
+        val shortSide = min(width, height)
+        val slotOffset = id - TouchShortcut.FIRST_ID - 1
+        val defaultX = if (id in TouchShortcut.slots)
+            width / 2f + slotOffset * shortSide * 0.14f - controlWidth / 2f else 0f
+        val defaultY = if (id in TouchShortcut.slots) shortSide * 0.065f else 0f
+        val x = preferences.getFloat("$prefix-X", defaultX * layoutReferenceWidth / width)
+        val y = preferences.getFloat("$prefix-Y", defaultY * layoutReferenceHeight / height)
+        return (x * width / layoutReferenceWidth).toInt().coerceIn(0, (width - controlWidth).coerceAtLeast(0)) to
+            (y * height / layoutReferenceHeight).toInt().coerceIn(0, (height - controlHeight).coerceAtLeast(0))
+    }
+
     private fun defaultOverlayLandscape() {
         // Get screen size
         val display = (context as Activity).windowManager.defaultDisplay
@@ -787,7 +812,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
         // Each value is a percent from max X/Y stored as an int. Have to bring that value down
         // to a decimal before multiplying by MAX X/Y.
-        preferences.edit()
+        setLayoutReference(preferences.edit(), "", maxX, maxY)
             .putFloat(
                 AzaharButtonIds.BUTTON_A.toString() + "-X",
                 resources.getInteger(R.integer.N3DS_BUTTON_A_X).toFloat() / 1000 * maxX
@@ -936,7 +961,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
         // Each value is a percent from max X/Y stored as an int. Have to bring that value down
         // to a decimal before multiplying by MAX X/Y.
-        preferences.edit()
+        setLayoutReference(preferences.edit(), portrait, maxX, maxY)
             .putFloat(
                 AzaharButtonIds.BUTTON_A.toString() + portrait + "-X",
                 resources.getInteger(R.integer.N3DS_BUTTON_A_PORTRAIT_X).toFloat() / 1000 * maxX
@@ -1083,55 +1108,23 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         private val preferences
             get() = PreferenceManager.getDefaultSharedPreferences(OverlayHost.appContext)
 
-        /**
-         * Resizes a [Bitmap] by a given scale factor
-         *
-         * @param context       Context for getting the drawable/vector drawable
-         * @param drawableId    The ID of the drawable to scale.
-         * @param scale         The scale factor for the bitmap.
-         * @return The scaled [Bitmap]
-         */
-        private fun getBitmap(context: Context, drawableId: Int, scale: Float): Bitmap {
-            try {
-                val bitmap = BitmapFactory.decodeResource(context.resources, drawableId)
-                return resizeBitmap(context, bitmap, scale)
-            } catch (_: NullPointerException) {
-            }
+        // Positions in preferences use the dimensions of the layout that wrote them.
+        fun setLayoutReference(
+            editor: SharedPreferences.Editor, orientation: String, width: Float, height: Float
+        ): SharedPreferences.Editor = editor
+            .putFloat("TouchLayout$orientation-Width", width)
+            .putFloat("TouchLayout$orientation-Height", height)
 
-            val vectorDrawable = ContextCompat.getDrawable(context, drawableId) as VectorDrawable
+        private fun getBitmap(overlay: InputOverlay, drawableId: Int, scale: Float): Bitmap {
+            val size = (min(overlay.width, overlay.height) * scale).toInt().coerceAtLeast(1)
+            val bitmap = BitmapFactory.decodeResource(overlay.resources, drawableId)
+            if (bitmap != null) return Bitmap.createScaledBitmap(bitmap, size, size, true)
 
-            val bitmap = Bitmap.createBitmap(
-                (vectorDrawable.intrinsicWidth * scale).toInt(),
-                (vectorDrawable.intrinsicHeight * scale).toInt(),
-                Bitmap.Config.ARGB_8888
-            )
-
-            val scaledBitmap = resizeBitmap(context, bitmap, scale)
-            val canvas = Canvas(scaledBitmap)
-            vectorDrawable.setBounds(0, 0, canvas.width, canvas.height)
-            vectorDrawable.draw(canvas)
-            return scaledBitmap
-        }
-
-        /**
-         * Resizes a [Bitmap] by a given scale factor
-         *
-         * @param context The current [Context]
-         * @param bitmap  The [Bitmap] to scale.
-         * @param scale   The scale factor for the bitmap.
-         * @return The scaled [Bitmap]
-         */
-        private fun resizeBitmap(context: Context, bitmap: Bitmap, scale: Float): Bitmap {
-            // Determine the button size based on the smaller screen dimension.
-            // This makes sure the buttons are the same size in both portrait and landscape.
-            val dm = context.resources.displayMetrics
-            val minDimension = min(dm.widthPixels, dm.heightPixels)
-            return Bitmap.createScaledBitmap(
-                bitmap,
-                (minDimension * scale).toInt(),
-                (minDimension * scale).toInt(),
-                true
-            )
+            val drawable = ContextCompat.getDrawable(overlay.context, drawableId) as VectorDrawable
+            val result = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            drawable.setBounds(0, 0, size, size)
+            drawable.draw(Canvas(result))
+            return result
         }
 
         /**
@@ -1162,21 +1155,21 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
          * InputOverlayDrawableButton. Simply add it to the HashSet of overlay items and wait
          * for Android to call the onDraw method.
          *
-         * @param context      The current [Context].
+         * @param overlay      The current [Context].
          * @param defaultResId The resource ID of the [Drawable] to get the [Bitmap] of (Default State).
          * @param pressedResId The resource ID of the [Drawable] to get the [Bitmap] of (Pressed State).
          * @param buttonId     Identifier for determining what type of button the initialized InputOverlayDrawableButton represents.
          * @return An [InputOverlayDrawableButton] with the correct drawing bounds set.
          */
         private fun initializeOverlayButton(
-            context: Context,
+            overlay: InputOverlay,
             defaultResId: Int,
             pressedResId: Int,
             buttonId: Int,
             orientation: String
         ): InputOverlayDrawableButton {
             // Resources handle for fetching the initial Drawable resource.
-            val res = context.resources
+            val res = overlay.resources
 
             // Decide scale based on button ID and user preference
             var scale: Float = when (buttonId) {
@@ -1203,25 +1196,16 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             val opacity: Int = preferences.getInt("controlOpacity", 50) * 255 / 100
 
             // Initialize the InputOverlayDrawableButton.
-            val defaultStateBitmap = getBitmap(context, defaultResId, scale)
-            val pressedStateBitmap = getBitmap(context, pressedResId, scale)
+            val defaultStateBitmap = getBitmap(overlay, defaultResId, scale)
+            val pressedStateBitmap = getBitmap(overlay, pressedResId, scale)
             val overlayDrawable =
                 InputOverlayDrawableButton(res, defaultStateBitmap, pressedStateBitmap, buttonId, opacity)
 
             // The X and Y coordinates of the InputOverlayDrawableButton on the InputOverlay.
             // These were set in the input overlay configuration menu.
-            val xKey = "$buttonId$orientation-X"
-            val yKey = "$buttonId$orientation-Y"
             val width = overlayDrawable.width
             val height = overlayDrawable.height
-            val metrics = res.displayMetrics
-            val short = min(metrics.widthPixels, metrics.heightPixels)
-            val slotOffset = buttonId - TouchShortcut.FIRST_ID - 1
-            val defaultX = if (buttonId in TouchShortcut.slots)
-                metrics.widthPixels / 2f + slotOffset * short * 0.14f - width / 2f else 0f
-            val defaultY = if (buttonId in TouchShortcut.slots) short * 0.065f else 0f
-            val drawableX = preferences.getFloat(xKey, defaultX).toInt()
-            val drawableY = preferences.getFloat(yKey, defaultY).toInt()
+            val (drawableX, drawableY) = overlay.controlPosition(buttonId, orientation, width, height)
 
             // Now set the bounds for the InputOverlayDrawableButton.
             // This will dictate where on the screen (and the what the size) the InputOverlayDrawableButton will be.
@@ -1235,7 +1219,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         /**
          * Initializes an [InputOverlayDrawableDpad]
          *
-         * @param context                   The current [Context].
+         * @param overlay                   The current [Context].
          * @param defaultResId              The [Bitmap] resource ID of the default sate.
          * @param pressedOneDirectionResId  The [Bitmap] resource ID of the pressed sate in one direction.
          * @param pressedTwoDirectionsResId The [Bitmap] resource ID of the pressed sate in two directions.
@@ -1246,7 +1230,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
          * @return the initialized [InputOverlayDrawableDpad]
          */
         private fun initializeOverlayDpad(
-            context: Context,
+            overlay: InputOverlay,
             defaultResId: Int,
             pressedOneDirectionResId: Int,
             pressedTwoDirectionsResId: Int,
@@ -1257,7 +1241,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             orientation: String
         ): InputOverlayDrawableDpad {
             // Resources handle for fetching the initial Drawable resource.
-            val res = context.resources
+            val res = overlay.resources
 
             // Decide scale based on button ID and user preference
             var scale = 0.22f
@@ -1274,9 +1258,9 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             val opacity: Int = preferences.getInt("controlOpacity", 50) * 255 / 100
 
             // Initialize the InputOverlayDrawableDpad.
-            val defaultStateBitmap = getBitmap(context, defaultResId, scale)
-            val pressedOneDirectionStateBitmap = getBitmap(context, pressedOneDirectionResId, scale)
-            val pressedTwoDirectionsStateBitmap = getBitmap(context, pressedTwoDirectionsResId, scale)
+            val defaultStateBitmap = getBitmap(overlay, defaultResId, scale)
+            val pressedOneDirectionStateBitmap = getBitmap(overlay, pressedOneDirectionResId, scale)
+            val pressedTwoDirectionsStateBitmap = getBitmap(overlay, pressedTwoDirectionsResId, scale)
             val overlayDrawable = InputOverlayDrawableDpad(
                 res,
                 defaultStateBitmap,
@@ -1291,10 +1275,9 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
             // The X and Y coordinates of the InputOverlayDrawableDpad on the InputOverlay.
             // These were set in the input overlay configuration menu.
-            val drawableX = preferences.getFloat("$buttonUp$orientation-X", 0f).toInt()
-            val drawableY = preferences.getFloat("$buttonUp$orientation-Y", 0f).toInt()
             val width = overlayDrawable.width
             val height = overlayDrawable.height
+            val (drawableX, drawableY) = overlay.controlPosition(buttonUp, orientation, width, height)
 
             // Now set the bounds for the InputOverlayDrawableDpad.
             // This will dictate where on the screen (and the what the size) the InputOverlayDrawableDpad will be.
@@ -1308,7 +1291,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         /**
          * Initializes an [InputOverlayDrawableJoystick]
          *
-         * @param context         The current [Context]
+         * @param overlay         The current [Context]
          * @param resOuter        Resource ID for the outer image of the joystick (the static image that shows the circular bounds).
          * @param defaultResInner Resource ID for the default inner image of the joystick (the one you actually move around).
          * @param pressedResInner Resource ID for the pressed inner image of the joystick.
@@ -1316,7 +1299,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
          * @return the initialized [InputOverlayDrawableJoystick].
          */
         private fun initializeOverlayJoystick(
-            context: Context,
+            overlay: InputOverlay,
             resOuter: Int,
             defaultResInner: Int,
             pressedResInner: Int,
@@ -1324,7 +1307,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             orientation: String
         ): InputOverlayDrawableJoystick {
             // Resources handle for fetching the initial Drawable resource.
-            val res = context.resources
+            val res = overlay.resources
 
             // Decide scale based on user preference
             var scale = 0.275f
@@ -1337,32 +1320,15 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             val opacity: Int = preferences.getInt("controlOpacity", 50) * 255 / 100
 
             // Initialize the InputOverlayDrawableJoystick.
-            val bitmapOuter = getBitmap(context, resOuter, scale)
-            val bitmapInnerDefault = getBitmap(context, defaultResInner, scale)
-            val bitmapInnerPressed = getBitmap(context, pressedResInner, scale)
+            val bitmapOuter = getBitmap(overlay, resOuter, scale)
+            val bitmapInnerDefault = getBitmap(overlay, defaultResInner, scale)
+            val bitmapInnerPressed = getBitmap(overlay, pressedResInner, scale)
 
-            // The X and Y coordinates of the InputOverlayDrawableButton on the InputOverlay.
-            // These were set in the input overlay configuration menu.
-            val drawableX = preferences.getFloat("$joystick$orientation-X", 0f).toInt()
-            val drawableY = preferences.getFloat("$joystick$orientation-Y", 0f).toInt()
-
-            // Decide inner scale based on joystick ID
-            var outerScale = 1f
-            if (joystick == AzaharButtonIds.STICK_C) {
-                outerScale = 2f
-            }
-
-            // Now set the bounds for the InputOverlayDrawableJoystick.
-            // This will dictate where on the screen (and the what the size) the InputOverlayDrawableJoystick will be.
-            val outerSize = bitmapOuter.width
-            val outerRect = Rect(
-                drawableX,
-                drawableY,
-                drawableX + (outerSize / outerScale).toInt(),
-                drawableY + (outerSize / outerScale).toInt()
-            )
-            val innerRect =
-                Rect(0, 0, (outerSize / outerScale).toInt(), (outerSize / outerScale).toInt())
+            val divisor = if (joystick == AzaharButtonIds.STICK_C) 2 else 1
+            val outerSize = (bitmapOuter.width / divisor).coerceAtLeast(1)
+            val (drawableX, drawableY) = overlay.controlPosition(joystick, orientation, outerSize, outerSize)
+            val outerRect = Rect(drawableX, drawableY, drawableX + outerSize, drawableY + outerSize)
+            val innerRect = Rect(0, 0, outerSize, outerSize)
 
             // Send the drawableId to the joystick so it can be referenced when saving control position.
             val overlayDrawable = InputOverlayDrawableJoystick(

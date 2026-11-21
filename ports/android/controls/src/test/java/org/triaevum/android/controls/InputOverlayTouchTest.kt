@@ -61,6 +61,7 @@ class InputOverlayTouchTest {
             .putBoolean("OverlayInit", true)
             .putBoolean("EmulationMenuSettings_ShowOverlay", false).commit()
         overlay = InputOverlay(activity, null)
+        overlay.layout(0, 0, 1000, 500)
         EmulationMenuSettings.hapticFeedback = false
         EmulationMenuSettings.joystickRelCenter = false
         EmulationMenuSettings.buttonSlide = ButtonSlidingMode.Disabled.int
@@ -144,6 +145,30 @@ class InputOverlayTouchTest {
         assertEquals(1, sink.homeTaps)
         overlay.setMenuOpen(false)
         assertTrue(controls<InputOverlayDrawableButton>("overlayButtons").isEmpty())
+    }
+
+    @Test fun resizingRemapsTheSavedLayoutAndScalesControlsFromTheOverlay() {
+        val orientation = if (activity.resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT) "-Portrait" else ""
+        val position = "${AzaharButtonIds.BUTTON_HOME}$orientation"
+        val preferences = PreferenceManager.getDefaultSharedPreferences(activity)
+        InputOverlay.setLayoutReference(preferences.edit(), orientation, 1000f, 500f)
+            .putFloat("$position-X", 800f)
+            .putFloat("$position-Y", 100f)
+            .apply()
+        overlay.setMenuOpen(true)
+        fun homeBounds() = Rect(controls<InputOverlayDrawableButton>("overlayButtons").single().bounds)
+        val original = homeBounds()
+
+        overlay.layout(0, 0, 1600, 800)
+        val larger = homeBounds()
+        assertEquals(1280, larger.left)
+        assertEquals(160, larger.top)
+        assertEquals(original.width() * 8 / 5, larger.width())
+
+        overlay.layout(0, 0, 1000, 500)
+        assertEquals(original, homeBounds())
+        assertEquals(800f, preferences.getFloat("$position-X", -1f), 0f)
     }
 
     @Test fun focusLossDiscardsLateMotionAndAllowsAFreshGesture() {
