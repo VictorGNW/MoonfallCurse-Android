@@ -92,7 +92,7 @@ class TouchOverlayInput : Native3dsInputTarget {
     }
 
     fun createAdapter() = AzaharInputAdapter(this).apply {
-        if (BuildConfig.FLAVOR == "mc") shortcutFor = EmulationMenuSettings::shortcut
+        if (BuildConfig.FLAVOR == "mc") shortcutFor = { id -> EmulationMenuSettings.shortcut(id) }
     }
 
     override fun button(hidMask: Int, pressed: Boolean) = NativeInputBridge.button(hidMask, pressed)
