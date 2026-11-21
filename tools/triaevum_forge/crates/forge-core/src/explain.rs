@@ -878,7 +878,8 @@ pub fn result_notices(result: &Value) -> Vec<Value> {
             continue;
         };
         let status = receipt.get(status_key).and_then(Value::as_str).unwrap_or("unknown");
-        if status != "complete" {
+        let intentionally_skipped = status_key == "device_pipeline_prewarm" && status == "skipped_by_user";
+        if status != "complete" && !intentionally_skipped {
             let error = receipt.get("error").and_then(Value::as_str).map(|error| format!(": {error}"));
             incomplete.push(format!("{label}: {status}{}", error.unwrap_or_default()));
         }
@@ -895,6 +896,15 @@ pub fn result_notices(result: &Value) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn intentionally_skipping_device_pipeline_prewarm_is_not_a_warning() {
+        let result = json!({"build": {
+            "renderer_shader_preparation": {"renderer_shader_preparation": "complete"},
+            "device_pipeline_preparation": {"device_pipeline_prewarm": "skipped_by_user"}
+        }});
+        assert!(result_notices(&result).is_empty());
+    }
 
     #[test]
     fn every_record_has_its_texts_and_every_text_is_used() {
