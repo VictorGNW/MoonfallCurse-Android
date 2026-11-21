@@ -473,7 +473,16 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
             unsigned(p.fragmentShadingRateWithFragmentShaderInterlock),
             unsigned(p.fragmentShadingRateWithCustomSampleLocations),
             unsigned(p.fragmentShadingRateStrictMultiplyCombiner), rates.empty() ? "-" : rates.c_str());
-        const auto policy = Renderer3ds::PicaVrs::RequestedPolicy();
+        auto policy = Renderer3ds::PicaVrs::RequestedPolicy();
+#if defined(__ANDROID__)
+        // Some Android drivers can stop completing queued work during play.
+        // Keep optional variable-rate shading off by default as a conservative
+        // diagnostic workaround, while allowing explicit developer opt-in.
+        if (std::getenv("TRIAEVUM_VRS_SKY") == nullptr) {
+            policy = Renderer3ds::PicaVrs::SkyPolicy::Off;
+            std::fprintf(stderr, "TRIAEVUM_VRS enabled=0 reason=android_default\n");
+        }
+#endif
         uint8_t skyRate = Renderer3ds::PicaVrs::RequestedSkyRate();
         if (skyRate == Renderer3ds::PicaVrs::kRate4x4 &&
             (p.maxFragmentSize.width < 4U || p.maxFragmentSize.height < 4U))
