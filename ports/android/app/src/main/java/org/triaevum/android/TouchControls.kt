@@ -55,6 +55,7 @@ class TouchOverlayInput : Native3dsInputTarget {
     private var resumed = false
     private var touching = false
     private var idle = false
+    private var menuOpen = false
     private var appliedRevision = 0
     private var appliedEdit = 0
     private var appliedReset = 0
@@ -165,6 +166,12 @@ class TouchOverlayInput : Native3dsInputTarget {
         if (requests.size < 8) return
         val view = overlay ?: return
         val preferences = preferences() ?: return
+        val newMenuOpen = requests.getOrElse(8) { 0 } != 0
+        if (menuOpen != newMenuOpen) {
+            menuOpen = newMenuOpen
+            view.setMenuOpen(menuOpen)
+            restartIdleTimer()
+        }
         if (requests[0] != appliedRevision) {
             appliedRevision = requests[0]
             preferences.edit()
@@ -234,7 +241,7 @@ class TouchOverlayInput : Native3dsInputTarget {
             layout.removeView(editBar)
             editBar = null
             view.setIsInEditMode(false)
-            view.refreshControls()
+            if (!menuOpen) view.refreshControls()
         }
         restartIdleTimer()
         view.invalidate()
@@ -320,14 +327,14 @@ class TouchOverlayInput : Native3dsInputTarget {
         handler.removeCallbacks(hideAfterIdle)
         idle = false
         updateVisibility()
-        if (resumed && !touching && editBar == null && !hidesForController()) {
+        if (resumed && !touching && !menuOpen && editBar == null && !hidesForController()) {
             handler.postDelayed(hideAfterIdle, TOUCH_IDLE_MS)
         }
     }
 
     private fun updateVisibility() {
         val view = overlay ?: return
-        val visible = editBar != null ||
+        val visible = menuOpen || editBar != null ||
             (preferences()?.getBoolean(SHOW_OVERLAY, true) == true && !idle && !hidesForController())
         val visibility = if (visible) View.VISIBLE else View.INVISIBLE
         if (view.visibility == visibility) return

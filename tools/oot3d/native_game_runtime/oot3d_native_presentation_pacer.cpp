@@ -188,9 +188,17 @@ void NativeRealtimeRefreshPacer::ObservePresentation(
     }
     ++mStats.PresentationIntervals;
     mStats.TotalIntervalSeconds += interval;
-    // One line per presentation gap above 25 ms, in log order with the
-    // renderer's pipeline/shader lines, so a hitch can be attributed.
+#if defined(__ANDROID__)
+    // At 30 Hz the normal 33 ms interval crosses the desktop diagnostic
+    // threshold. Allow cadence jitter and limit synchronous stderr writes.
+    const double hitchThreshold = mTargetRateHz != 0U
+        ? std::max(0.025, 1.5 / static_cast<double>(mTargetRateHz))
+        : 0.050;
+    if (interval > hitchThreshold && presentationTime >= mNextHitchLogTime) {
+        mNextHitchLogTime = presentationTime + std::chrono::seconds(1);
+#else
     if (interval > 0.025) {
+#endif
         std::fprintf(stderr, "TRIAEVUM_PRESENTATION_HITCH interval_ms=%.1f presentation=%llu\n",
                      interval * 1000.0,
                      static_cast<unsigned long long>(mStats.PresentationIntervals));

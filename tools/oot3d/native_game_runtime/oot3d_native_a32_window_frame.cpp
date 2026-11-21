@@ -707,6 +707,9 @@ bool NativeA32WindowSession::RunFrame() {
     inGameMenu.Update(menuInput, imGuiOwnsInput, presentationElapsedSeconds);
   }
 #endif
+#if defined(__ANDROID__)
+  ThreeDsRecomp::Input::OverlayTouchSettings().SetMenuOpen(inGameMenu.IsOpen());
+#endif
   if (nativeControlPollingState.ScriptedMenu.PressesApplied != 0U && inGameMenu.IsOpen()) ++nativeControlPollingState.ScriptedMenu.OpenFrames;
   // The first-play help card, once per installation, when the game is first
   // shown (after the preparation screen) and no other host surface is up.

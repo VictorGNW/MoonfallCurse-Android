@@ -129,6 +129,23 @@ class InputOverlayTouchTest {
         assertTrue(sink.held.isEmpty()); assertEquals(0, sink.homeTaps)
     }
 
+    @Test fun openMenuKeepsHomeAndPassesOtherTouchesThrough() {
+        down(50f, 50f)
+        overlay.setMenuOpen(true)
+        assertTrue(sink.held.isEmpty())
+        assertEquals(0, sink.homeTaps)
+        val menu = controls<InputOverlayDrawableButton>("overlayButtons").single()
+        assertEquals(AzaharButtonIds.BUTTON_HOME, menu.id)
+        assertTrue(controls<InputOverlayDrawableDpad>("overlayDpads").isEmpty())
+        assertTrue(controls<InputOverlayDrawableJoystick>("overlayJoysticks").isEmpty())
+        assertFalse(down(menu.bounds.right + 1f, menu.bounds.centerY().toFloat()))
+        assertTrue(down(menu.bounds.centerX().toFloat(), menu.bounds.centerY().toFloat()))
+        up(menu.bounds.centerX().toFloat(), menu.bounds.centerY().toFloat())
+        assertEquals(1, sink.homeTaps)
+        overlay.setMenuOpen(false)
+        assertTrue(controls<InputOverlayDrawableButton>("overlayButtons").isEmpty())
+    }
+
     @Test fun focusLossDiscardsLateMotionAndAllowsAFreshGesture() {
         down(275f, 75f)
         assertTrue(sink.axes.isNotEmpty())

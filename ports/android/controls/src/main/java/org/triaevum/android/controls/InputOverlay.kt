@@ -75,6 +75,16 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             invalidate()
         }
 
+    private var menuOpen = false
+    private val menuOnly: Boolean
+        get() = menuOpen && !isInEditMode
+
+    fun setMenuOpen(open: Boolean) {
+        if (open == menuOpen) return
+        menuOpen = open
+        if (!isInEditMode) refreshControls()
+    }
+
     override fun draw(canvas: Canvas) {
         super.draw(canvas)
         val art = controlArt
@@ -154,6 +164,9 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             return true
         }
         if (motionEvent == MotionEvent.ACTION_DOWN) {
+            if (menuOnly && overlayButtons.none { it.bounds.contains(event.x.toInt(), event.y.toInt()) }) {
+                return false
+            }
             if (gestureActive) cancelTouches()
             gestureActive = true
         }
@@ -609,15 +622,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             )
         }
         if (preferences.getBoolean("buttonToggle13", false)) {
-            overlayButtons.add(
-                initializeOverlayButton(
-                    context,
-                    R.drawable.button_home,
-                    R.drawable.button_home_pressed,
-                    AzaharButtonIds.BUTTON_HOME,
-                    orientation
-                )
-            )
+            addMenuButton(orientation)
         }
 
         if (preferences.getBoolean("buttonToggle14", false)) {
@@ -645,6 +650,18 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         }
     }
 
+    private fun addMenuButton(orientation: String) {
+        overlayButtons.add(
+            initializeOverlayButton(
+                context,
+                R.drawable.button_home,
+                R.drawable.button_home_pressed,
+                AzaharButtonIds.BUTTON_HOME,
+                orientation
+            )
+        )
+    }
+
     fun refreshControls() {
         cancelTouches()
         // Remove all the overlay buttons from the HashSet.
@@ -659,7 +676,9 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             }
 
         // Add all the enabled overlay items back to the HashSet.
-        if (EmulationMenuSettings.showOverlay) {
+        if (menuOnly) {
+            addMenuButton(orientation)
+        } else if (EmulationMenuSettings.showOverlay || (isInEditMode && menuOpen)) {
             addOverlayControls(orientation)
         }
         invalidate()
@@ -692,9 +711,13 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
     fun setIsInEditMode(isInEditMode: Boolean) {
         if (this.isInEditMode == isInEditMode) return
-        cancelTouches()
         this.isInEditMode = isInEditMode
-        if (!isInEditMode) publishControlBounds()
+        if (menuOpen) {
+            refreshControls()
+        } else {
+            cancelTouches()
+            if (!isInEditMode) publishControlBounds()
+        }
     }
 
     private fun defaultOverlay() {

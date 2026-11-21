@@ -83,19 +83,22 @@ JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_reportOverlay
 }
 
 // The host menu's requests: revision, visible, opacity, size, vibration,
-// hide with controller, layout editing serial, layout reset serial.
+// hide with controller, layout editing serial, layout reset serial, menu open.
 JNIEXPORT jintArray JNICALL Java_org_triaevum_android_NativeInputBridge_overlayRequests(JNIEnv* env, jobject) {
-    const auto requests = ThreeDsRecomp::Input::OverlayTouchSettings().PendingRequests();
-    const jint values[8]{static_cast<jint>(requests.Revision),
+    const auto& settings = ThreeDsRecomp::Input::OverlayTouchSettings();
+    const auto requests = settings.PendingRequests();
+    const jint values[]{static_cast<jint>(requests.Revision),
                          requests.Values.Visible ? 1 : 0,
                          requests.Values.OpacityPercent,
                          requests.Values.SizePercent,
                          requests.Values.Vibration ? 1 : 0,
                          requests.Values.HideWithController ? 1 : 0,
                          static_cast<jint>(requests.EditLayoutSerial),
-                         static_cast<jint>(requests.ResetLayoutSerial)};
-    jintArray result = env->NewIntArray(8);
-    if (result != nullptr) env->SetIntArrayRegion(result, 0, 8, values);
+                         static_cast<jint>(requests.ResetLayoutSerial),
+                         settings.MenuOpen() ? 1 : 0};
+    constexpr jsize count = sizeof(values) / sizeof(values[0]);
+    jintArray result = env->NewIntArray(count);
+    if (result != nullptr) env->SetIntArrayRegion(result, 0, count, values);
     return result;
 }
 

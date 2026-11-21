@@ -81,6 +81,9 @@ class NativeRealtimeRefreshPacer final {
     std::chrono::steady_clock::time_point mStart;
     std::chrono::steady_clock::time_point mNextDeadline;
     std::chrono::steady_clock::time_point mLastPresentationTime;
+#if defined(__ANDROID__)
+    std::chrono::steady_clock::time_point mNextHitchLogTime{};
+#endif
     NativeRealtimeRefreshPacerStats mStats;
     std::chrono::nanoseconds mLastSlack{0};
 #ifdef _WIN32
