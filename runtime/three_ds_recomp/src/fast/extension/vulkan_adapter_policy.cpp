@@ -48,7 +48,7 @@ VulkanQueueTopologyPlan ResolveVulkanQueueTopology(
     // compatibility path after release-image timeouts on a Mali driver.
     // A shared queue orders rendering and presentation without a host wait.
     if (mode == VulkanPresentDispatchMode::Automatic &&
-        (videoDriver == "wayland" || videoDriver == "android"))
+        (videoDriver == "wayland" || videoDriver == "Android" || videoDriver == "android"))
         mode = VulkanPresentDispatchMode::GraphicsQueue;
     VulkanQueueTopologyPlan plan;
     plan.GraphicsFamily = graphicsFamily;

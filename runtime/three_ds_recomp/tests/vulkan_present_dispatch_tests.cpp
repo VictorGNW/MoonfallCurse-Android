@@ -36,10 +36,11 @@ int main() {
         const auto wayland = ResolveVulkanQueueTopology(3, 3, 2, Mode::Automatic, "wayland");
         Require(!wayland.AsynchronousPresent && wayland.RequestedGraphicsQueueCount == 1 &&
                     wayland.PresentQueueIndex == 0, "Wayland must default to the shared queue");
-        const auto android = ResolveVulkanQueueTopology(3, 3, 2, Mode::Automatic, "android");
+        // SDL2 reports its Android video driver as "Android" on the device.
+        const auto android = ResolveVulkanQueueTopology(3, 3, 2, Mode::Automatic, "Android");
         Require(!android.AsynchronousPresent && android.RequestedGraphicsQueueCount == 1 &&
                     android.PresentQueueIndex == 0, "Android must default to the shared queue");
-        const auto androidAsync = ResolveVulkanQueueTopology(3, 3, 2, Mode::Asynchronous, "android");
+        const auto androidAsync = ResolveVulkanQueueTopology(3, 3, 2, Mode::Asynchronous, "Android");
         Require(androidAsync.AsynchronousPresent && androidAsync.PresentQueueIndex == 1,
                 "Android must retain the explicit async override");
         for (const auto driver : {"x11", "windows", "cocoa", ""}) {
