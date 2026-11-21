@@ -3,6 +3,7 @@
 #ifdef ENABLE_OOT3D_VULKAN
 #include "gfx_vulkan_internal.h"
 #include "gfx_vulkan_raster_stats.h"
+#include "fast/backends/startup_checkpoints.h"
 #include "fast/renderer3ds/vulkan_commands.h"
 #include "fast/renderer3ds/vulkan_memory_budget.h"
 #include "fast/renderer3ds/vulkan_device_path_report.h"
@@ -672,6 +673,10 @@ void GfxRenderingAPIVulkan::CreatePipelineCache() {
     };
     createInfo.initialDataSize = cachedData.size();
     createInfo.pInitialData = cachedData.empty() ? nullptr : cachedData.data();
+#if defined(__ANDROID__)
+    const auto cacheImportStart = std::chrono::steady_clock::now();
+    const auto inputBytes = cachedData.size();
+#endif
     VkResult result = vkCreatePipelineCache(mDevice, &createInfo, nullptr,
                                             &mPipelineCache);
     if (result != VK_SUCCESS && !cachedData.empty()) {
@@ -687,6 +692,12 @@ void GfxRenderingAPIVulkan::CreatePipelineCache() {
         result = vkCreatePipelineCache(mDevice, &createInfo, nullptr,
                                        &mPipelineCache);
     }
+#if defined(__ANDROID__)
+    std::fprintf(stderr, "TRIAEVUM_PIPELINE_CACHE_IMPORT nri=0 input_bytes=%zu accepted=%u result=%d ms=%.1f\n",
+                 inputBytes, unsigned(loaded && result == VK_SUCCESS), static_cast<int>(result),
+                 std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - cacheImportStart).count());
+#endif
     CheckVk(result, "vkCreatePipelineCache");
     SPDLOG_INFO("OOT3D Vulkan pipeline cache: {}{}",
                 loaded ? "loaded " : "new",
@@ -1024,6 +1035,7 @@ void GfxRenderingAPIVulkan::ReportDeviceLoss(VkResult result, const char* operat
     // The next producer sweep releases every pooled GPU-copy image and turns
     // pooling off; nothing is reused on a lost device.
     mGpuCopyImagePoolDeviceLost.store(true);
+    StartupCheckpointf("vulkan_device_lost %s", operation);
     const auto report = [](const std::string& line) {
         SPDLOG_WARN("{}", line);
         std::fprintf(stderr, "%s\n", line.c_str());

@@ -14,6 +14,7 @@
 // reimplemented for the phone's window host.
 #if defined(ENABLE_OOT3D_VULKAN) && defined(__ANDROID__)
 #include "gfx_vulkan_internal.h"
+#include "fast/backends/startup_checkpoints.h"
 
 #include <SDL2/SDL_syswm.h>
 #include <cstdio>
@@ -21,8 +22,10 @@
 namespace Fast {
 
 void GfxRenderingAPIVulkan::NoteAndroidSurfaceLost(const char* where) noexcept {
-    if (!mAndroidSurfaceLost.exchange(true))
+    if (!mAndroidSurfaceLost.exchange(true)) {
         std::fprintf(stderr, "TRIAEVUM_SURFACE_LOST where=%s\n", where);
+        StartupCheckpointf("vulkan_surface_lost %s", where);
+    }
 }
 
 void GfxRenderingAPIVulkan::DropAndroidSurface(const char* reason) {
@@ -105,6 +108,7 @@ bool GfxRenderingAPIVulkan::EnsureAndroidSurface() {
     }
     std::fprintf(stderr, "TRIAEVUM_SURFACE_REBUILT width=%u height=%u\n", mSwapchainExtent.width,
                  mSwapchainExtent.height);
+    StartupCheckpointf("vulkan_surface_rebuilt %ux%u", mSwapchainExtent.width, mSwapchainExtent.height);
     return true;
 }
 

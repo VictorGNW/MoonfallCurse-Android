@@ -561,7 +561,14 @@ void GfxRenderingAPIVulkan::PrepareNativePicaPrograms(
     // About one thread per physical core, one left to the frame: driver
     // compilation oversubscribed across logical cores makes each part (and the
     // draw waiting for it) several times slower for no added throughput.
-    const unsigned defaultThreads = std::clamp(std::thread::hardware_concurrency() / 2U, 2U, 9U) - 1U;
+#if defined(__ANDROID__)
+    // Keep cold-start driver allocations bounded while the game is rendering.
+    constexpr unsigned maximumStartupWorkers = 2U;
+#else
+    constexpr unsigned maximumStartupWorkers = 8U;
+#endif
+    const unsigned defaultThreads = std::clamp(
+        std::thread::hardware_concurrency() / 2U, 2U, maximumStartupWorkers + 1U) - 1U;
     // Diagnostic override (TRIAEVUM_STARTUP_PART_THREADS=1..default): fewer
     // parts created at once, to measure the driver memory a cold start takes.
     unsigned threads = defaultThreads;

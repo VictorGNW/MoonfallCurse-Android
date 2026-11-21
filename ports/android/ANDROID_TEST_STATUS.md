@@ -83,3 +83,40 @@ before changing the number of workers or the startup shader inventory.
 The GPU-specific loader and cache namespace experiments remain in their
 original branch. This branch uses the system Vulkan path and the existing
 driver-identity checks for saved pipelines.
+
+## Frame pacing, input, CPU scheduling, and resume
+
+Android 11 and later receive the port's configured presentation rate as a
+surface hint. The hint is cleared while paused and reapplied to the active
+surface after resume or recreation. It does not replace the native pacer.
+Android 12 and later request seamless mode switches.
+
+ADPF reports exclude the port's deliberate input and inline pacing sleeps,
+render-stream drain and submission backpressure. A render-worker hint is
+reported only for a frame acquired on that worker. Android startup pipeline
+preparation uses at most two workers, leaving core placement to the OS.
+
+Vulkan logs time cache reads and driver imports separately. The Android report
+records surface loss and rebuild and the first device-lost operation. Surface
+recovery keeps the existing swapchain lifecycle.
+
+Device checks to run with a prepared game and matching graphics settings:
+
+- Compare the same 30 or 60 fps target with the default surface hint and with
+  `TRIAEVUM_ANDROID_FRAME_RATE_HINT=0`. Repeat after Home and a screen lock.
+- For input, use `TRIAEVUM_PARALLEL_PRESENTATION=1`,
+  `TRIAEVUM_INPUT_ADMISSION=auto`, and `TRIAEVUM_INPUT_LATENCY=1`.
+  Compare `TRIAEVUM_RENDER_FRAMES_IN_FLIGHT=1` and `=2`, keeping the other
+  settings fixed. A clean quit prints the input-to-frame-end timing summary.
+  This is a software timing and does not include the panel's response.
+- Compare normal ADPF with `TRIAEVUM_PERFORMANCE_HINT=0`, then separately
+  compare `TRIAEVUM_STARTUP_PART_THREADS=1` and `=2` where supported.
+  Keep the driver cache state equivalent. Review cache load/import, startup
+  part preparation, and time to `first_frame_presented`.
+- Check Home, screen lock, and return during startup preparation and gameplay.
+  Verify that input is released, the menu pauses gameplay, and rendering
+  resumes after the surface is ready. Collect diagnostics on any failure.
+
+The device available for this pass had no Moonfall Curse installation, so these
+gameplay and lifecycle comparisons remain pending. The first-use Perfetto
+study and thermal adaptation are deferred.

@@ -30,7 +30,7 @@ public final class TriAevumActivity extends SDLActivity {
         if (config.isFile()) {
             try {
                 maximumShortEdge = new JSONObject(new String(Files.readAllBytes(config.toPath()), StandardCharsets.UTF_8))
-                    .getInt("maximum_surface_short_edge");
+                    .optInt("maximum_surface_short_edge", maximumShortEdge);
                 if (maximumShortEdge < 0) throw new IllegalArgumentException("Negative surface limit");
             } catch (Exception error) {
                 Log.w("TriAevum", "Invalid Android host config; using 720p surface limit", error);
@@ -87,7 +87,19 @@ public final class TriAevumActivity extends SDLActivity {
         mSurface.requestFocus();
     }
 
+    // Called from SDL's native frame loop when its target cadence changes.
+    public void updatePresentationRate(int hz) {
+        runOnUiThread(() -> {
+            if (!isDestroyed() && mSurface instanceof TriAevumSurface) {
+                ((TriAevumSurface) mSurface).setPresentationRate(hz);
+            }
+        });
+    }
+
     @Override protected void onPause() {
+        if (mSurface instanceof TriAevumSurface) {
+            ((TriAevumSurface) mSurface).setFrameRateHintActive(false);
+        }
         StartupDiagnostics.stage(this, "paused");
         // Leaving the game is a pause: the game's menu holds it until the player is back.
         if (!mBrokenLibraries) {
@@ -105,6 +117,9 @@ public final class TriAevumActivity extends SDLActivity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (mSurface instanceof TriAevumSurface) {
+            ((TriAevumSurface) mSurface).setFrameRateHintActive(true);
+        }
         StartupDiagnostics.stage(this, "resumed");
         if (touchInput != null) touchInput.resume();
     }

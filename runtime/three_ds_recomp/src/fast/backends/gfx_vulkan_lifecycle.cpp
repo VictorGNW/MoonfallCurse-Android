@@ -300,7 +300,17 @@ void GfxRenderingAPIVulkan::Init() {
         // title's pipelines are never loaded, nor replaced by this title's.
         const auto nriCachePath = VulkanPipelineCachePath(true);
         LoadTitlePipelineCache(true, MakePipelineCacheHeader(properties), data);
+#if defined(__ANDROID__)
+        const auto cacheImportStart = std::chrono::steady_clock::now();
+#endif
         const bool initialized = mNriPicaPipelineBridge.InitializePipelineCache(data);
+#if defined(__ANDROID__)
+        std::fprintf(stderr, "TRIAEVUM_PIPELINE_CACHE_IMPORT nri=1 input_bytes=%zu accepted_bytes=%llu ok=%u ms=%.1f\n",
+                     data.size(), static_cast<unsigned long long>(
+                         mNriPicaPipelineBridge.PipelineStatistics().InitialCacheBytes), unsigned(initialized),
+                     std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - cacheImportStart).count());
+#endif
         SPDLOG_INFO("NRI PICA pipeline cache: initialized={}, accepted {} bytes", initialized,
                     mNriPicaPipelineBridge.PipelineStatistics().InitialCacheBytes);
         // Pipelines compiled this session reach the disk while it runs, not
