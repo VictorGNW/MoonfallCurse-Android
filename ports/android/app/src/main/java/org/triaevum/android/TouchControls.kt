@@ -23,6 +23,7 @@ object NativeInputBridge {
     external fun releaseAll()
     external fun controlBounds(anchor: Int, present: Boolean, left: Float, top: Float, right: Float, bottom: Float)
     external fun titleDrawsControls(): Boolean
+    external fun zoraTouchArt(): Boolean
     external fun reportOverlaySettings(appliedRevision: Int, visible: Boolean, opacity: Int, size: Int,
                                        vibration: Boolean,
                                        hideWithController: Boolean)
@@ -55,12 +56,16 @@ class TouchOverlayInput : Native3dsInputTarget {
     private var homeHeld = false
     private var homeLongPressed = false
     private var titleDraws = false
+    private var moonfallArt: MoonfallTouchArt? = null
     private val watchTitle = object : Runnable {
         override fun run() {
             val draws = NativeInputBridge.titleDrawsControls()
             if (draws != titleDraws) {
                 titleDraws = draws
                 overlay?.invalidate()
+            }
+            moonfallArt?.let { art ->
+                overlay?.controlArt = if (NativeInputBridge.zoraTouchArt()) art.zora else art.standard
             }
             applyRequests()
             handler.postDelayed(this, TITLE_POLL_MS)
@@ -106,6 +111,11 @@ class TouchOverlayInput : Native3dsInputTarget {
         this.activity = activity
         this.overlay = overlay
         this.parent = parent
+        if (BuildConfig.FLAVOR == "mc") {
+            val art = MoonfallTouchArt(activity)
+            moonfallArt = art
+            overlay.controlArt = art.standard
+        }
         reportSettings()
     }
 
@@ -251,8 +261,7 @@ class TouchOverlayInput : Native3dsInputTarget {
 
         /**
          * First run of each layout version: the controls OoT3D uses that the donor hides by default
-         * (ZL/ZR, HOME as the menu key), no C-stick (a finger dragging on the game moves the
-         * camera), SELECT/HOME at the top centre and START above A. Later changes are the user's.
+         * (ZL/ZR, HOME as the menu key), plus a C-stick for Moonfall Curse. Later changes are the user's.
          * Runs after the overlay wrote its own defaults; refresh the overlay afterwards.
          */
         fun seedDefaults(activity: Activity) {
@@ -291,6 +300,26 @@ class TouchOverlayInput : Native3dsInputTarget {
                 editor.putInt("controlScale-$scaleId", Math.round(size / base * 100f - 50f))
                 editor.putFloat("$id-X", (centerX - size * 0.5f) * short)
                 editor.putFloat("$id-Y", (centerY - size * 0.5f) * short)
+            }
+            if (BuildConfig.FLAVOR == "mc") {
+                editor.putBoolean("buttonToggle12", true)
+                fun put(id: Int, base: Float, size: Float, x: Float, y: Float) = place(id, id, base, size, x, y)
+                put(AzaharButtonIds.TRIGGER_L, 0.18f, 0.16f, 0.17f, 0.15f)
+                put(AzaharButtonIds.BUTTON_ZL, 0.18f, 0.16f, 0.17f, 0.32f)
+                place(AzaharButtonIds.DPAD_UP, AzaharButtonIds.DPAD, 0.22f, 0.20f, 0.17f, 0.51f)
+                put(AzaharButtonIds.STICK_LEFT, 0.275f, 0.28f, 0.19f, 0.78f)
+                put(AzaharButtonIds.BUTTON_HOME, 0.08f, 0.11f, aspect - 0.08f, 0.09f)
+                put(AzaharButtonIds.BUTTON_ZR, 0.18f, 0.16f, aspect - 0.37f, 0.18f)
+                put(AzaharButtonIds.TRIGGER_R, 0.18f, 0.20f, aspect - 0.16f, 0.29f)
+                put(AzaharButtonIds.BUTTON_A, 0.11f, 0.13f, aspect - 0.16f, 0.57f)
+                put(AzaharButtonIds.BUTTON_B, 0.11f, 0.13f, aspect - 0.31f, 0.71f)
+                put(AzaharButtonIds.BUTTON_X, 0.11f, 0.13f, aspect - 0.31f, 0.45f)
+                put(AzaharButtonIds.BUTTON_Y, 0.11f, 0.13f, aspect - 0.46f, 0.57f)
+                // The overlay applies an additional 0.5 scale to the C-stick.
+                put(AzaharButtonIds.STICK_C, 0.1375f, 0.17f, aspect - 0.14f, 0.83f)
+                put(AzaharButtonIds.BUTTON_SELECT, 0.08f, 0.16f, aspect * 0.5f - 0.09f, 0.88f)
+                put(AzaharButtonIds.BUTTON_START, 0.08f, 0.16f, aspect * 0.5f + 0.09f, 0.88f)
+                return editor
             }
             // About 9 mm on S25; keep the square hit boxes separated as well as the discs.
             val face = 0.14f

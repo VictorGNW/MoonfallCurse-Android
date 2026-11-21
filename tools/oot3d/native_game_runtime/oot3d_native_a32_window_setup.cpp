@@ -127,6 +127,9 @@ void NativeA32WindowSession::InstallProductCrashDiagnostics() {
 }
 
 void NativeA32WindowSession::Setup() {
+#if defined(__ANDROID__)
+  ThreeDsRecomp::Input::OverlayTouchAnchors().SetZoraTouchArt(false);
+#endif
   if (launch.Host.Renderer != "opengl" &&
       launch.Host.Renderer != "nri" &&
       launch.Host.Renderer != "vulkan") {

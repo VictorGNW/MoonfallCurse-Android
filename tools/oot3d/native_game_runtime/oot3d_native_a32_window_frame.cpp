@@ -803,6 +803,10 @@ bool NativeA32WindowSession::RunFrame() {
   const float touchCanvasWidth =
       240.0F * static_cast<float>(windowRegion.Width) / static_cast<float>(windowRegion.Height);
   const auto touchAnchors = ThreeDsRecomp::Input::OverlayTouchAnchors().Snapshot();
+#if defined(__ANDROID__)
+  ThreeDsRecomp::Input::OverlayTouchAnchors().SetZoraTouchArt(
+      titleSession && titleSession->UsesZoraTouchArt(process.Memory()));
+#endif
   const bool drawsTouchControls = launch.UiProfile == Oot3dNativeGame::Oot3dUiProfile::TopScreen &&
                                   activeTopScreenConfig.TouchLayout &&
                                   ThreeDsRecomp::Input::AnyTouchAnchored(touchAnchors);

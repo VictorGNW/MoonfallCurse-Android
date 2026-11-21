@@ -67,12 +67,30 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         requestFocus()
     }
 
+    // Presentation changes leave all hit boxes and captured pointers intact.
+    var controlArt: TouchControlArt? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            invalidate()
+        }
+
     override fun draw(canvas: Canvas) {
         super.draw(canvas)
-        // TriAevum: a control the host draws itself is drawn here only while editing.
-        overlayButtons.forEach { if (isInEditMode || !OverlayHost.drawsControl(it.id)) it.draw(canvas) }
-        overlayDpads.forEach { if (isInEditMode || !OverlayHost.drawsControl(it.upId)) it.draw(canvas) }
-        overlayJoysticks.forEach { if (isInEditMode || !OverlayHost.drawsControl(it.joystickId)) it.draw(canvas) }
+        val art = controlArt
+        overlayButtons.forEach { button ->
+            if (art?.draw(canvas, button.id, button.bounds, button.opacity,
+                    button.status == AzaharButtonState.PRESSED) != true &&
+                (isInEditMode || !OverlayHost.drawsControl(button.id))) button.draw(canvas)
+        }
+        overlayDpads.forEach { dpad ->
+            if (art?.draw(canvas, dpad.upId, dpad.bounds, dpad.opacity, dpad.trackId != -1) != true &&
+                (isInEditMode || !OverlayHost.drawsControl(dpad.upId))) dpad.draw(canvas)
+        }
+        overlayJoysticks.forEach { joystick ->
+            if (art?.drawStick(canvas, joystick) != true &&
+                (isInEditMode || !OverlayHost.drawsControl(joystick.joystickId))) joystick.draw(canvas)
+        }
     }
 
     private fun swapScreen() {

@@ -67,6 +67,10 @@ JNIEXPORT jboolean JNICALL Java_org_triaevum_android_NativeInputBridge_titleDraw
     return ThreeDsRecomp::Input::OverlayTouchAnchors().TitleDrawsControls() ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL Java_org_triaevum_android_NativeInputBridge_zoraTouchArt(JNIEnv*, jobject) {
+    return ThreeDsRecomp::Input::OverlayTouchAnchors().ZoraTouchArt() ? JNI_TRUE : JNI_FALSE;
+}
+
 // The overlay's own settings, as it saved them.
 JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_reportOverlaySettings(
     JNIEnv*, jobject, jint appliedRevision, jboolean visible, jint opacity, jint size, jboolean vibration,

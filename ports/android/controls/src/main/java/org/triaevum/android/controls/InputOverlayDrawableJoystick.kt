@@ -85,6 +85,9 @@ class InputOverlayDrawableJoystick(
         outerBitmap.alpha = opacity
     }
 
+    internal val thumbBounds: Rect
+        get() = currentStateBitmapDrawable.bounds
+
     fun draw(canvas: Canvas?) {
         outerBitmap.draw(canvas!!)
         boundsBoxBitmap.draw(canvas)
