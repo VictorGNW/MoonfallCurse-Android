@@ -299,8 +299,7 @@ void GfxRenderingAPIVulkan::Init() {
         // The title's own cache file (VulkanPipelineCachePath): another
         // title's pipelines are never loaded, nor replaced by this title's.
         const auto nriCachePath = VulkanPipelineCachePath(true);
-        LoadPipelineCacheData(nriCachePath, MakePipelineCacheHeader(properties), data,
-                              kMaximumNriPipelineCacheBytes);
+        LoadTitlePipelineCache(true, MakePipelineCacheHeader(properties), data);
         const bool initialized = mNriPicaPipelineBridge.InitializePipelineCache(data);
         SPDLOG_INFO("NRI PICA pipeline cache: initialized={}, accepted {} bytes", initialized,
                     mNriPicaPipelineBridge.PipelineStatistics().InitialCacheBytes);
@@ -309,9 +308,15 @@ void GfxRenderingAPIVulkan::Init() {
         // the shutdown-only store for comparisons).
         if (const char* flush = std::getenv("TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH");
             initialized && (flush == nullptr || std::string_view(flush) != "0")) {
+            Renderer3ds::PipelineCacheFlushPolicy flushPolicy;
+#if defined(__ANDROID__)
+            // Mobile drivers can serialize a large cache snapshot with pipeline creation.
+            // Keep periodic recovery, but leave more time between full snapshots.
+            flushPolicy.MinimumIntervalSeconds = 60.0;
+#endif
             mNriPipelineCacheFlusher.Start(
                 nriCachePath, MakePipelineCacheHeader(properties), kMaximumNriPipelineCacheBytes,
-                [this] { return mNriPicaPipelineBridge.GetPipelineCacheData(); });
+                [this] { return mNriPicaPipelineBridge.GetPipelineCacheData(); }, flushPolicy);
         }
     }
     LoadDlssFeatureRecord();

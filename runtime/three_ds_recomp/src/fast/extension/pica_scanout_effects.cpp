@@ -219,6 +219,24 @@ vec4 oot3d_compose_at(vec2 uv) {
 void main() {
     vec2 source_uv = OOT3D_SCANOUT_SOURCE_UV;
     if (OOT3D_SCANOUT_FLIP_Y) source_uv.y = 1.0 - source_uv.y;
+    if (scanout.aa_mode == 2u) {
+        vec2 pixel = gl_FragCoord.xy;
+        if (all(greaterThanEqual(pixel, vec2(scanout.projection_offset_x, scanout.projection_offset_y))) &&
+            all(lessThan(pixel, vec2(scanout.projection_scale_x, scanout.projection_scale_y)))) discard;
+
+        vec2 radius = clamp(2.0 * scanout.inverse_size, vec2(0.002), vec2(0.009));
+        vec3 scene = 4.0 * texture(physical_scanout, source_uv).rgb;
+        scene += texture(physical_scanout, source_uv + vec2(radius.x, 0.0)).rgb;
+        scene += texture(physical_scanout, source_uv - vec2(radius.x, 0.0)).rgb;
+        scene += texture(physical_scanout, source_uv + vec2(0.0, radius.y)).rgb;
+        scene += texture(physical_scanout, source_uv - vec2(0.0, radius.y)).rgb;
+        vec3 tint = vec3(0.40, 0.34, 0.16);
+        if (scanout.input_linear != 0u) tint = oot3d_srgb_to_linear(tint);
+        scene = mix(scene * (0.38 / 8.0), tint, 0.22);
+        if (scanout.encode_srgb != 0u) scene = oot3d_linear_to_srgb(scene);
+        output_color = vec4(scene, 1.0);
+        return;
+    }
     if(oot3d_guide_diagnostic_mode!=0 && (scanout.ambient_occlusion!=0u || scanout.outline!=0u)) {
         output_color=vec4(oot3d_guide_diagnostic(source_uv),1.0);
         return;

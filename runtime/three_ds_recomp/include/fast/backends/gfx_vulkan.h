@@ -326,6 +326,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     void SetPresentationSettingsHeld(bool held) override {
         mPresentationSettingsHeld = held;
     }
+    void SetMenuBackdropVisible(bool visible) override { mMenuBackdropVisible = visible; }
     bool PublishSceneView(
         const Extension::TitleSceneViewSubmission& view) override;
     bool ResetTitleState(std::string* error = nullptr) override;
@@ -2036,6 +2037,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     float mInternalResolutionScale = 1.0F;
     bool mPresentationSettingsApplied = false;
     bool mPresentationSettingsHeld = false;
+    bool mMenuBackdropVisible = false;
     uint8_t mAppliedWindowMode = 0;
     uint32_t mAppliedOutputWidth = 0;
     uint32_t mAppliedOutputHeight = 0;

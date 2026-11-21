@@ -45,6 +45,18 @@ struct PicaScanoutPushConstants {
 
 static_assert(sizeof(PicaScanoutPushConstants) == 128U);
 
+// A separate draw using the scanout pipeline. Projection constants are unused
+// in this mode and carry the window-space bounds of the picture to skip.
+inline PicaScanoutPushConstants PicaMenuBackdropConstants(
+    PicaScanoutPushConstants scanout, float left, float top, float right, float bottom) {
+    scanout.AaMode = 2U;
+    scanout.ProjectionOffsetX = left;
+    scanout.ProjectionOffsetY = top;
+    scanout.ProjectionScaleX = right;
+    scanout.ProjectionScaleY = bottom;
+    return scanout;
+}
+
 struct PicaScanoutPolicyInput {
     uint32_t TransferFlags = 0;
     uint32_t AaMode = 0;

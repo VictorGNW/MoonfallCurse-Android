@@ -405,6 +405,23 @@ bool NriPicaScanoutPass::Execute(
         const nri::SetDescriptorSetDesc setDesc{
             0, set, nri::BindPoint::GRAPHICS};
         mImpl->Core->CmdSetDescriptorSet(*command, setDesc);
+        if (desc.MenuBackdropPicture) {
+            const auto& picture = *desc.MenuBackdropPicture;
+            const auto left = static_cast<float>(picture.offset.x);
+            const auto top = static_cast<float>(picture.offset.y);
+            const auto push = PicaMenuBackdropConstants(desc.Push, left, top,
+                left + picture.extent.width, top + picture.extent.height);
+            const nri::SetRootConstantsDesc constants{0, &push, sizeof(push)};
+            const nri::Viewport viewport{0.0F, 0.0F,
+                static_cast<float>(desc.TargetWidth), static_cast<float>(desc.TargetHeight),
+                0.0F, 1.0F, true};
+            const nri::Rect scissor{0, 0,
+                static_cast<nri::Dim_t>(desc.TargetWidth), static_cast<nri::Dim_t>(desc.TargetHeight)};
+            mImpl->Core->CmdSetRootConstants(*command, constants);
+            mImpl->Core->CmdSetViewports(*command, &viewport, 1);
+            mImpl->Core->CmdSetScissors(*command, &scissor, 1);
+            mImpl->Core->CmdDraw(*command, {3, 1, 0, 0});
+        }
         const nri::SetRootConstantsDesc constants{
             0, &desc.Push, sizeof(desc.Push)};
         mImpl->Core->CmdSetRootConstants(*command, constants);

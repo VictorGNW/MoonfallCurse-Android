@@ -506,7 +506,22 @@ void GfxRenderingAPIVulkan::PrepareNativePicaPrograms(
         Renderer3ds::NativeFragmentArtifacts(), device);
     const auto samples = device.Samples;
     const auto prepare = [this, device](const Item& item) {
-        return Renderer3ds::PreparePicaStartupProgramPart(mNriPicaPipelineBridge, item, device);
+#if defined(__ANDROID__)
+        const auto start = std::chrono::steady_clock::now();
+#endif
+        const bool prepared = Renderer3ds::PreparePicaStartupProgramPart(mNriPicaPipelineBridge, item, device);
+#if defined(__ANDROID__)
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (!prepared || elapsed >= std::chrono::seconds(1)) {
+            std::fprintf(stderr,
+                         "TRIAEVUM_STARTUP_PIPELINE_SLOW vs=%016llx fs=%016llx samples=%u a2c=%u ok=%u ms=%.1f\n",
+                         static_cast<unsigned long long>(Renderer3ds::NriPicaTraceProgramHash(item.Vertex)),
+                         static_cast<unsigned long long>(Renderer3ds::NriPicaTraceProgramHash(item.Fragment)),
+                         static_cast<unsigned>(device.Samples), unsigned(item.AlphaToCoverage),
+                         unsigned(prepared), std::chrono::duration<double, std::milli>(elapsed).count());
+        }
+#endif
+        return prepared;
     };
     const auto start = std::chrono::steady_clock::now();
     std::fprintf(stderr, "TRIAEVUM_NATIVE_PROGRAM_PREPARATION_BEGIN parts=%zu background=%u\n",

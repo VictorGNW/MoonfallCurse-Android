@@ -131,6 +131,13 @@ std::vector<uint32_t> SpirvCache::Resolve(std::string_view source, SpirvStage st
     };
     count(&SpirvCacheStats::Requests);
     const auto path = Enabled() ? EntryPath(source, stage) : std::filesystem::path{};
+    std::unique_lock<std::mutex> entryLock;
+    if (!path.empty()) {
+        // Hold through publication so another request for this shader sees
+        // the completed cache entry instead of compiling it concurrently.
+        const auto slot = std::filesystem::hash_value(path) % mEntryLocks.size();
+        entryLock = std::unique_lock(mEntryLocks[slot]);
+    }
     std::vector<uint32_t> words;
     const auto readStart = Clock::now();
     const bool found = !path.empty() && Load(path, source, stage, words);

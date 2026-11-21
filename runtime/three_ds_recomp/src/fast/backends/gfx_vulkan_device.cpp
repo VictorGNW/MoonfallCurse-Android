@@ -664,9 +664,8 @@ void GfxRenderingAPIVulkan::CreatePipelineCache() {
     vkGetPhysicalDeviceProperties(mPhysicalDevice, &properties);
     const VulkanPipelineCacheHeader expected =
         MakePipelineCacheHeader(properties);
-    const std::filesystem::path path = VulkanPipelineCachePath();
     std::vector<uint8_t> cachedData;
-    bool loaded = LoadPipelineCacheData(path, expected, cachedData);
+    bool loaded = LoadTitlePipelineCache(false, expected, cachedData);
 
     VkPipelineCacheCreateInfo createInfo{
         VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO

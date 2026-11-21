@@ -121,6 +121,9 @@ bool LowerPreparationProcessPriority() {
 void LowerPreparationThreadPriority() {
 #ifdef _WIN32
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(__ANDROID__)
+    // Android's Linux scheduler applies nice to the calling thread.
+    (void)nice(5);
 #endif
 }
 

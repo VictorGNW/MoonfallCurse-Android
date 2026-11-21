@@ -43,6 +43,7 @@ struct NriPicaScanoutDesc {
     // physical surface, an offscreen boundary materializes a surface-domain
     // image a native consumer samples.
     bool OffscreenTarget = false;
+    std::optional<VkRect2D> MenuBackdropPicture;
 };
 
 class NriPicaScanoutPass final {

@@ -80,6 +80,7 @@ void PipelineCacheFlusher::Worker() {
 }
 
 bool PipelineCacheFlusher::FlushOnce(uint64_t created) {
+    const auto snapshotStarted = std::chrono::steady_clock::now();
     std::vector<uint8_t> data;
     try {
         data = mSnapshot();
@@ -95,14 +96,20 @@ bool PipelineCacheFlusher::FlushOnce(uint64_t created) {
         ++mStatistics.Skipped;
         return false;
     }
+    const auto storeStarted = std::chrono::steady_clock::now();
     std::string error;
     const bool stored = StorePipelineCacheData(mPath, mIdentity, data, &error, mMaximumBytes);
+    const auto storedAt = std::chrono::steady_clock::now();
+    using Milliseconds = std::chrono::duration<double, std::milli>;
     std::lock_guard lock(mMutex);
     if (stored) {
         ++mStatistics.Flushes;
         mStatistics.FlushedBytes += data.size();
-        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH result=stored bytes=%zu created=%llu\n",
-                     data.size(), static_cast<unsigned long long>(created));
+        std::fprintf(stderr,
+                     "TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH result=stored bytes=%zu created=%llu snapshot_ms=%.1f store_ms=%.1f\n",
+                     data.size(), static_cast<unsigned long long>(created),
+                     Milliseconds(storeStarted - snapshotStarted).count(),
+                     Milliseconds(storedAt - storeStarted).count());
     } else {
         ++mStatistics.Failures;
         std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH result=failed bytes=%zu created=%llu error=%s\n",

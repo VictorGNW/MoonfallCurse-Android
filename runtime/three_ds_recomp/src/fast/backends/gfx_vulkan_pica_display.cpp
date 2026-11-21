@@ -3949,6 +3949,12 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
         mGpuProfiler.BeginScope(
             mCurrentFrame, Extension::GpuProfileScope::Scanout,
             command);
+        std::optional<VkRect2D> menuBackdropPicture;
+        if (mMenuBackdropVisible && !alphaOverlay &&
+            (scissor.extent.width < mSwapchainExtent.width ||
+             scissor.extent.height < mSwapchainExtent.height)) {
+            menuBackdropPicture = scissor;
+        }
         const bool nriScanout = mNriPicaScanoutPass.Execute({
             mCurrentFrame,
             mFrameCounter,
@@ -3971,7 +3977,7 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             scissor.extent.height,
             {mClearColor[0], mClearColor[1],
              mClearColor[2], mClearColor[3]},
-            alphaOverlay}, scanoutBarrierPlan);
+            alphaOverlay, false, menuBackdropPicture}, scanoutBarrierPlan);
         if (nriScanout) {
             recordEffectPassTransitions(
                 mNriPicaScanoutPass.LastBarrierExecution());
@@ -3993,8 +3999,6 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             } else {
                 BeginRenderPassIfNeeded();
             }
-            vkCmdSetViewport(command, 0, 1, &viewport);
-            vkCmdSetScissor(command, 0, 1, &scissor);
             vkCmdBindPipeline(
                 command, VK_PIPELINE_BIND_POINT_GRAPHICS,
                 alphaOverlay ? mNativePicaScanoutOverlayPipeline
@@ -4003,6 +4007,24 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
                 command, VK_PIPELINE_BIND_POINT_GRAPHICS,
                 mNativePicaScanoutPipelineLayout, 0, 1,
                 &descriptor, 0, nullptr);
+            if (menuBackdropPicture) {
+                const auto& rect = *menuBackdropPicture;
+                const auto left = static_cast<float>(rect.offset.x);
+                const auto top = static_cast<float>(rect.offset.y);
+                const auto push = Extension::PicaMenuBackdropConstants(scanout, left, top,
+                    left + rect.extent.width, top + rect.extent.height);
+                const VkViewport backdropViewport{0.0F, 0.0F,
+                    static_cast<float>(mSwapchainExtent.width),
+                    static_cast<float>(mSwapchainExtent.height), 0.0F, 1.0F};
+                const VkRect2D backdropScissor{{0, 0}, mSwapchainExtent};
+                vkCmdSetViewport(command, 0, 1, &backdropViewport);
+                vkCmdSetScissor(command, 0, 1, &backdropScissor);
+                vkCmdPushConstants(command, mNativePicaScanoutPipelineLayout,
+                    VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+                vkCmdDraw(command, 3, 1, 0, 0);
+            }
+            vkCmdSetViewport(command, 0, 1, &viewport);
+            vkCmdSetScissor(command, 0, 1, &scissor);
             vkCmdPushConstants(
                 command, mNativePicaScanoutPipelineLayout,
                 VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(scanout),

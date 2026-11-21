@@ -61,6 +61,7 @@ class TitleRenderBackend {
     // another thread holds them there; the next frame begun on the owning
     // thread applies them.
     virtual void SetPresentationSettingsHeld(bool) {}
+    virtual void SetMenuBackdropVisible(bool) {}
     virtual bool PublishSceneView(const TitleSceneViewSubmission&) {
         return false;
     }

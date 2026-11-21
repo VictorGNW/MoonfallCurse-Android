@@ -2408,11 +2408,14 @@ bool GfxRenderingAPIVulkan::SubmitPicaDraw(
         }
         if (selectedPipeline == nullptr) {
             const auto completionStart = std::chrono::steady_clock::now();
+            Renderer3ds::SlowStepTrace preparationSteps("pica_preparation");
             AdoptNativePicaProgram(shaderIt->second, true);
+            preparationSteps.Mark("shader_program");
             selectedPipeline = &GetOrCreateNativePicaPipeline(
                 effectiveDraw, shaderIt->second, shaderVariant.Reactive,
                 shaderVariant.Domain, shaderVariant.RequestedFeatures,
                 shaderVariant.AppliedFeatures);
+            preparationSteps.Mark("device_pipeline");
             if (mPreparationQueue) {
                 ++mNativePicaPreparationCounters.CompletedDraws;
                 const double milliseconds = std::chrono::duration<double, std::milli>(

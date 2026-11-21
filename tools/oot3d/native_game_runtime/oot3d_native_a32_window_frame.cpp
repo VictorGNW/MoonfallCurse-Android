@@ -786,6 +786,14 @@ bool NativeA32WindowSession::RunFrame() {
       RunGuestRefresh();
     }
     if (presentHostFrame) {
+#if defined(__ANDROID__)
+      if (titleRenderBackend != nullptr) {
+        const bool menuBackdrop = inGameMenu.IsOpen() || widescreenProjection.TopScreenPausePageRedrawActive;
+        renderStream.Submit([backend = titleRenderBackend, menuBackdrop] {
+          backend->SetMenuBackdropVisible(menuBackdrop);
+        });
+      }
+#endif
       PresentVisualFrame(presentationElapsedSeconds, visualInterpolationAlpha);
     }
     frameCount += advanceGuest ? 1U : 0U;

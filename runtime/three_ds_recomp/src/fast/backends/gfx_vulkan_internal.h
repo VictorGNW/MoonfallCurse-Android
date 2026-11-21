@@ -123,6 +123,23 @@ std::filesystem::path VulkanPipelineCachePath(bool nri = false) {
     return directory.empty() || filename.empty() ? std::filesystem::path{} : directory / filename;
 }
 
+bool LoadTitlePipelineCache(bool nri, const VulkanPipelineCacheHeader& expected,
+                            std::vector<uint8_t>& data) {
+    const auto path = VulkanPipelineCachePath(nri);
+    const auto maximumBytes = nri ? kMaximumNriPipelineCacheBytes : Renderer3ds::kMaximumPipelineCacheBytes;
+#if defined(__ANDROID__)
+    const auto start = std::chrono::steady_clock::now();
+#endif
+    const bool loaded = LoadPipelineCacheData(path, expected, data, maximumBytes);
+#if defined(__ANDROID__)
+    const auto milliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    std::fprintf(stderr, "TRIAEVUM_PIPELINE_CACHE_LOAD nri=%u loaded=%u bytes=%zu ms=%.1f file=%s\n",
+                 unsigned(nri), unsigned(loaded), data.size(), milliseconds, path.filename().string().c_str());
+#endif
+    return loaded;
+}
+
 void CheckVk(VkResult result, const char* operation) {
     if (result != VK_SUCCESS) {
         throw std::runtime_error(std::string(operation) + " failed with VkResult " +
