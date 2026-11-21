@@ -104,9 +104,17 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         }
     }
 
+    internal fun containsButton(button: InputOverlayDrawableButton, x: Int, y: Int): Boolean {
+        if (!button.bounds.contains(x, y)) return false
+        // The Moonfall shoulder artwork is much shorter than its square
+        // drawable. Keep adjacent shoulders from receiving the same tap.
+        val height = controlArt?.shoulderHitHeight(button.id, button.bounds.width()) ?: return true
+        return kotlin.math.abs(y - button.bounds.exactCenterY()) < height / 2f
+    }
+
     private fun expandedButtonAt(x: Int, y: Int): InputOverlayDrawableButton? {
         if (!EmulationMenuSettings.expandedMainButtons ||
-            overlayButtons.any { it.bounds.contains(x, y) } ||
+            overlayButtons.any { containsButton(it, x, y) } ||
             overlayDpads.any { it.bounds.contains(x, y) } ||
             overlayJoysticks.any { it.bounds.contains(x, y) }) return null
         return overlayButtons.asSequence()

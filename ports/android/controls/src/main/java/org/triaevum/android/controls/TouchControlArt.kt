@@ -25,6 +25,13 @@ class TouchControlArt(private val bitmap: Bitmap, private val sprites: Map<Int, 
         typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
     }
 
+    internal fun shoulderHitHeight(id: Int, width: Int): Float? {
+        if (id != AzaharButtonIds.TRIGGER_L && id != AzaharButtonIds.BUTTON_ZL &&
+            id != AzaharButtonIds.BUTTON_ZR) return null
+        val source = sprites[id] ?: return null
+        return width * (source.height().toFloat() / source.width() + 0.04f)
+    }
+
     internal fun drawShortcut(canvas: Canvas, button: InputOverlayDrawableButton): Boolean {
         val glyph = EmulationMenuSettings.shortcut(button.id).glyph
         if (glyph.isEmpty() || !draw(canvas, button.id, button.bounds, button.opacity,

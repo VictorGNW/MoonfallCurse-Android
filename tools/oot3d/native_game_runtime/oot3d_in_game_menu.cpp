@@ -775,94 +775,6 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
     return row;
   };
 
-  tab.Rows.push_back(Heading("Devices"));
-  tab.Rows.push_back(controlToggle("Keyboard", "The keyboard drives the game.", &NativeControlConfig::KeyboardEnabled));
-  tab.Rows.push_back(controlToggle("Mouse", "The mouse aims and drives its bound buttons.", &NativeControlConfig::MouseEnabled));
-  tab.Rows.push_back(controlToggle("Controller", "The selected game controller drives the game.", &NativeControlConfig::ControllerEnabled));
-  tab.Rows.push_back(controlToggle("Capture mouse", "Hides and locks the pointer while the mouse is used in gameplay.",
-                                   &NativeControlConfig::CaptureMouseInGameplay));
-  {
-    // The same choice as F1 > Controls > Devices > Controller > Rumble (the
-    // controls owner keeps it).
-    Row row;
-    row.Key = "Rumble";
-    row.Kind = RowKind::Choice;
-    row.Help = "The active controller rumbles when Link takes damage or lands hard. The 3DS has no rumble, so it "
-               "is Off unless you choose it; a controller without a rumble motor stays still.";
-    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kRumbleStrengthCount; ++index)
-      row.Choices.emplace_back(ThreeDsRecomp::Input::RumbleStrengthLabel(static_cast<NativeRumbleStrength>(index)));
-    row.Read = [this] { return static_cast<int>(mControls.Rumble); };
-    row.Write = [this](int value) {
-      auto config = mControls;
-      config.Rumble = static_cast<NativeRumbleStrength>(value);
-      return ApplyControls(config);
-    };
-    row.Modified = [this] { return mControls.Rumble != NativeRumbleStrength::Off; };
-    tab.Rows.push_back(std::move(row));
-  }
-  {
-    // The same choice as F1 > Controls > Devices > Button prompts (the
-    // controls owner keeps it).
-    Row row;
-    row.Key = "Button prompts";
-    row.Kind = RowKind::Choice;
-    row.Help = "The buttons this menu and its help show. Automatic follows the device you used last: the pad in "
-               "your hands (Xbox, PlayStation, Nintendo, Steam Deck or generic labels), the keyboard, or touch.";
-    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kButtonPromptsCount; ++index)
-      row.Choices.emplace_back(ThreeDsRecomp::Input::ButtonPromptsLabel(static_cast<NativeButtonPrompts>(index)));
-    row.Read = [this] { return static_cast<int>(mControls.ButtonPrompts); };
-    row.Write = [this](int value) {
-      auto config = mControls;
-      config.ButtonPrompts = static_cast<NativeButtonPrompts>(value);
-      return ApplyControls(config);
-    };
-    row.Modified = [this] { return mControls.ButtonPrompts != NativeButtonPrompts::Automatic; };
-    tab.Rows.push_back(std::move(row));
-  }
-  if (mOwners.NativeButtonOverlay) {
-    Row row;
-    row.Key = "Native button labels";
-    row.Kind = RowKind::Choice;
-    row.Help = "Controller glyphs on the native MM3D HUD and prompts. Original 3DS and touch keep native artwork.";
-    row.Choices = {"Controller", "Original 3DS"};
-    row.Read = [this] { return mControls.NativeButtonLabels ? 0 : 1; };
-    row.Write = [this](int value) {
-      auto config = mControls;
-      config.NativeButtonLabels = value == 0;
-      return ApplyControls(config);
-    };
-    row.Modified = [this] { return !mControls.NativeButtonLabels; };
-    tab.Rows.push_back(std::move(row));
-  }
-  {
-    Row row;
-    row.Key = "Control preset";
-    row.Kind = RowKind::Choice;
-    row.Help = "Applies a complete set of bindings. Custom is what any edited binding becomes; bindings are "
-               "edited in F1 > Controls, which keeps the selected controller and its calibration.";
-    row.Choices = {"Keyboard", "Keyboard + mouse", "Controller", "Custom"};
-    row.Read = [this] { return static_cast<int>(mControls.Profile); };
-    row.Write = [this](int value) -> WriteResult {
-      if (value == static_cast<int>(NativeControlProfile::Custom)) return {"Custom is the result of editing a binding in F1", false};
-      const auto previous = mControls;
-      auto config = NativeControlPreset(static_cast<NativeControlProfile>(value));
-      config.PreferredControllerGuid = previous.PreferredControllerGuid;
-      config.PreferredControllerSerial = previous.PreferredControllerSerial;
-      config.CalibrationControllerGuid = previous.CalibrationControllerGuid;
-      config.CalibrationControllerSerial = previous.CalibrationControllerSerial;
-      config.GyroscopeBiasDegreesPerSecond = previous.GyroscopeBiasDegreesPerSecond;
-      config.AccelerometerNeutral = previous.AccelerometerNeutral;
-      config.ButtonPrompts = previous.ButtonPrompts;
-      config.NativeButtonLabels = previous.NativeButtonLabels;
-      config.Rumble = previous.Rumble;
-      config.QuickPutAway = previous.QuickPutAway;
-      config.RollDash = previous.RollDash;
-      return ApplyControls(config);
-    };
-    row.ChoiceAvailable = [](int value) { return value != static_cast<int>(NativeControlProfile::Custom); };
-    tab.Rows.push_back(std::move(row));
-  }
-
 #if defined(__ANDROID__)
   // The touch overlay owns and saves these; the rows ask it for changes.
   {
@@ -945,6 +857,100 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
                                      [] { OverlayTouchSettings().RequestLayoutReset(); }, "Layout reset"));
   }
 #endif
+
+  tab.Rows.push_back(Heading("Devices"));
+#if !defined(__ANDROID__)
+  tab.Rows.push_back(controlToggle("Keyboard", "The keyboard drives the game.", &NativeControlConfig::KeyboardEnabled));
+#endif
+  tab.Rows.push_back(controlToggle("Mouse", "The mouse aims and drives its bound buttons.", &NativeControlConfig::MouseEnabled));
+  tab.Rows.push_back(controlToggle("Controller", "The selected game controller drives the game.", &NativeControlConfig::ControllerEnabled));
+  tab.Rows.push_back(controlToggle("Capture mouse", "Hides and locks the pointer while the mouse is used in gameplay.",
+                                   &NativeControlConfig::CaptureMouseInGameplay));
+  {
+    // The same choice as F1 > Controls > Devices > Controller > Rumble (the
+    // controls owner keeps it).
+    Row row;
+    row.Key = "Rumble";
+    row.Kind = RowKind::Choice;
+    row.Help = "The active controller rumbles when Link takes damage or lands hard. The 3DS has no rumble, so it "
+               "is Off unless you choose it; a controller without a rumble motor stays still.";
+    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kRumbleStrengthCount; ++index)
+      row.Choices.emplace_back(ThreeDsRecomp::Input::RumbleStrengthLabel(static_cast<NativeRumbleStrength>(index)));
+    row.Read = [this] { return static_cast<int>(mControls.Rumble); };
+    row.Write = [this](int value) {
+      auto config = mControls;
+      config.Rumble = static_cast<NativeRumbleStrength>(value);
+      return ApplyControls(config);
+    };
+    row.Modified = [this] { return mControls.Rumble != NativeRumbleStrength::Off; };
+    tab.Rows.push_back(std::move(row));
+  }
+  {
+    // The same choice as F1 > Controls > Devices > Button prompts (the
+    // controls owner keeps it).
+    Row row;
+    row.Key = "Button prompts";
+    row.Kind = RowKind::Choice;
+    row.Help = "The buttons this menu and its help show. Automatic follows the device you used last: the pad in "
+               "your hands (Xbox, PlayStation, Nintendo, Steam Deck or generic labels), the keyboard, or touch.";
+    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kButtonPromptsCount; ++index)
+      row.Choices.emplace_back(ThreeDsRecomp::Input::ButtonPromptsLabel(static_cast<NativeButtonPrompts>(index)));
+    row.Read = [this] { return static_cast<int>(mControls.ButtonPrompts); };
+    row.Write = [this](int value) {
+      auto config = mControls;
+      config.ButtonPrompts = static_cast<NativeButtonPrompts>(value);
+      return ApplyControls(config);
+    };
+    row.Modified = [this] { return mControls.ButtonPrompts != NativeButtonPrompts::Automatic; };
+    tab.Rows.push_back(std::move(row));
+  }
+  if (mOwners.NativeButtonOverlay) {
+    Row row;
+    row.Key = "Native button labels";
+    row.Kind = RowKind::Choice;
+    row.Help = "Controller glyphs on the native MM3D HUD and prompts. Original 3DS and touch keep native artwork.";
+    row.Choices = {"Controller", "Original 3DS"};
+    row.Read = [this] { return mControls.NativeButtonLabels ? 0 : 1; };
+    row.Write = [this](int value) {
+      auto config = mControls;
+      config.NativeButtonLabels = value == 0;
+      return ApplyControls(config);
+    };
+    row.Modified = [this] { return !mControls.NativeButtonLabels; };
+    tab.Rows.push_back(std::move(row));
+  }
+#if !defined(__ANDROID__)
+  {
+    Row row;
+    row.Key = "Control preset";
+    row.Kind = RowKind::Choice;
+    row.Help = "Applies a complete set of bindings. Custom is what any edited binding becomes; bindings are "
+               "edited in F1 > Controls, which keeps the selected controller and its calibration.";
+    row.Choices = {"Keyboard", "Keyboard + mouse", "Controller", "Custom"};
+    row.Read = [this] { return static_cast<int>(mControls.Profile); };
+    row.Write = [this](int value) -> WriteResult {
+      if (value == static_cast<int>(NativeControlProfile::Custom)) return {"Custom is the result of editing a binding in F1", false};
+      const auto previous = mControls;
+      auto config = NativeControlPreset(static_cast<NativeControlProfile>(value));
+      config.PreferredControllerGuid = previous.PreferredControllerGuid;
+      config.PreferredControllerSerial = previous.PreferredControllerSerial;
+      config.CalibrationControllerGuid = previous.CalibrationControllerGuid;
+      config.CalibrationControllerSerial = previous.CalibrationControllerSerial;
+      config.GyroscopeBiasDegreesPerSecond = previous.GyroscopeBiasDegreesPerSecond;
+      config.AccelerometerNeutral = previous.AccelerometerNeutral;
+      config.ButtonPrompts = previous.ButtonPrompts;
+      config.NativeButtonLabels = previous.NativeButtonLabels;
+      config.Rumble = previous.Rumble;
+      config.QuickPutAway = previous.QuickPutAway;
+      config.RollDash = previous.RollDash;
+      return ApplyControls(config);
+    };
+    row.ChoiceAvailable = [](int value) { return value != static_cast<int>(NativeControlProfile::Custom); };
+    tab.Rows.push_back(std::move(row));
+  }
+#endif
+
+
 
   tab.Rows.push_back(Heading("Aiming"));
   {

@@ -87,7 +87,7 @@ class InputOverlayDrawableButton(
         val isActionUp =
             motionEvent == MotionEvent.ACTION_UP || motionEvent == MotionEvent.ACTION_POINTER_UP
         if (isActionDown) {
-            if (trackId != -1 || (!expandedHit && !bounds.contains(xPosition, yPosition))) {
+            if (trackId != -1 || (!expandedHit && !overlay.containsButton(this, xPosition, yPosition))) {
                 return false
             }
             buttonDown(true, pointerId, overlay)
@@ -103,7 +103,7 @@ class InputOverlayDrawableButton(
 
         val isActionMoving = motionEvent == MotionEvent.ACTION_MOVE
         if (buttonSliding != ButtonSlidingMode.Disabled.int && isActionMoving) {
-            val inside = bounds.contains(xPosition, yPosition)
+            val inside = overlay.containsButton(this, xPosition, yPosition)
             if (pressedState) {
                 // button is already pressed
                 // check whether we moved out of the button area to update the state

@@ -224,6 +224,9 @@ class NativeControlsSettingsPanel final
           ImGui::EndTabItem();
         }
       };
+#if defined(__ANDROID__)
+      section("Touch", [&] { DrawTouch(); });
+#endif
       section("Bindings", [&] { DrawBindings(); });
       section("Camera", [&] {
         // The camera orbiting Link in gameplay (TopScreen's free camera; its
@@ -256,7 +259,9 @@ class NativeControlsSettingsPanel final
           }
         } else ImGui::TextDisabled("TopScreen profile is not active");
       });
+#if !defined(__ANDROID__)
       section("Touch", [&] { DrawTouch(); });
+#endif
       ImGui::EndTabBar();
     }
     DrawBindingCapture();
@@ -511,7 +516,12 @@ class NativeControlsSettingsPanel final
              std::pair{"Keyboard", BindingDevice::Keyboard},
              std::pair{"Mouse", BindingDevice::Mouse},
              std::pair{"Controller", BindingDevice::Controller}}) {
+#if defined(__ANDROID__)
+      if (device == BindingDevice::Keyboard) continue;
+      if (device == BindingDevice::Controller) ImGui::SameLine();
+#else
       if (device != BindingDevice::Keyboard) ImGui::SameLine();
+#endif
       if (ImGui::RadioButton(label, mBindingDevice == device)) mBindingDevice = device;
     }
     ImGui::SetNextItemWidth(-1.0F);
@@ -871,7 +881,11 @@ class NativeControlsSettingsPanel final
   bool mControlDirty = false;
   std::string mStatus;
   NativeControlProfile mPresetSelection = NativeControlProfile::KeyboardMouse;
+#if defined(__ANDROID__)
+  BindingDevice mBindingDevice = BindingDevice::Controller;
+#else
   BindingDevice mBindingDevice = BindingDevice::Keyboard;
+#endif
   std::array<char, 96> mActionFilter{};
   std::array<char, 64> mKeySearch{};
   std::size_t mCaptureAction = 0;
