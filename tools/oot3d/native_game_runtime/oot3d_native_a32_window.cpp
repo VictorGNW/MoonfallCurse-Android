@@ -302,5 +302,10 @@ void NativeA32WindowSession::Finish() {
 
 void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
   Oot3dA32Window::NativeA32WindowSession session(launch);
-  session.Run();
+  try {
+    session.Run();
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "TRIAEVUM_SESSION_ERROR %s\n", error.what());
+    throw;
+  }
 }
