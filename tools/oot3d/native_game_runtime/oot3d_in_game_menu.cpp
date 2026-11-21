@@ -922,7 +922,7 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
       return row;
     };
     tab.Rows.push_back(Heading("Touch controls"));
-    tab.Rows.push_back(overlayToggle("Touch controls", "Shows the on-screen controls over the game.",
+    tab.Rows.push_back(overlayToggle("Touch controls", "Shows the on-screen controls. They hide after 15 seconds without touch and return when you touch the screen.",
                                      &TouchOverlayValues::Visible));
     tab.Rows.push_back(overlayNumber("Opacity", "How opaque the on-screen controls are.",
                                      &TouchOverlayValues::OpacityPercent, 0, 100, 5));
@@ -931,7 +931,7 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
     tab.Rows.push_back(overlayToggle("Vibration", "A short vibration when a control is pressed.",
                                      &TouchOverlayValues::Vibration));
     tab.Rows.push_back(overlayToggle("Hide with a controller",
-                                     "Hides the on-screen controls while a game controller is used; a touch shows them.",
+                                     "Hides the on-screen controls while a game controller is connected.",
                                      &TouchOverlayValues::HideWithController));
     if (mOwners.TopScreen)
       tab.Rows.push_back(topScreenToggle("Game HUD on the controls",

@@ -689,14 +689,14 @@ class NativeControlsSettingsPanel final
     auto values = overlay.Values();
     const auto before = values;
     ImGui::Checkbox("Touch controls", &values.Visible);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shows the on-screen controls over the game.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shows the on-screen controls. They hide after 15 seconds without touch and return when you touch the screen.");
     ControlWidgets::SliderInt("Opacity##touch", &values.OpacityPercent, 0, 100, "%d%%");
     ControlWidgets::SliderInt("Size##touch", &values.SizePercent, 50, 200, "%d%%");
     ImGui::Checkbox("Vibration##touch", &values.Vibration);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("A short vibration when a control is pressed.");
     ImGui::Checkbox("Hide with a controller", &values.HideWithController);
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Hides the on-screen controls while a game controller is used; a touch shows them.");
+      ImGui::SetTooltip("Hides the on-screen controls while a game controller is connected.");
     if (values != before) {
       overlay.Request(values);
       mStatus = "Touch controls saved";
