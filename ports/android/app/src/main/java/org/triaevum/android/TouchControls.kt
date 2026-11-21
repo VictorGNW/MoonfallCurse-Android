@@ -303,22 +303,34 @@ class TouchOverlayInput : Native3dsInputTarget {
             }
             if (BuildConfig.FLAVOR == "mc") {
                 editor.putBoolean("buttonToggle12", true)
-                fun put(id: Int, base: Float, size: Float, x: Float, y: Float) = place(id, id, base, size, x, y)
-                put(AzaharButtonIds.TRIGGER_L, 0.18f, 0.16f, 0.17f, 0.15f)
-                put(AzaharButtonIds.BUTTON_ZL, 0.18f, 0.16f, 0.17f, 0.32f)
-                place(AzaharButtonIds.DPAD_UP, AzaharButtonIds.DPAD, 0.22f, 0.20f, 0.17f, 0.51f)
-                put(AzaharButtonIds.STICK_LEFT, 0.275f, 0.28f, 0.19f, 0.78f)
-                put(AzaharButtonIds.BUTTON_HOME, 0.08f, 0.11f, aspect - 0.08f, 0.09f)
-                put(AzaharButtonIds.BUTTON_ZR, 0.18f, 0.16f, aspect - 0.37f, 0.18f)
-                put(AzaharButtonIds.TRIGGER_R, 0.18f, 0.20f, aspect - 0.16f, 0.29f)
-                put(AzaharButtonIds.BUTTON_A, 0.11f, 0.13f, aspect - 0.16f, 0.57f)
-                put(AzaharButtonIds.BUTTON_B, 0.11f, 0.13f, aspect - 0.31f, 0.71f)
-                put(AzaharButtonIds.BUTTON_X, 0.11f, 0.13f, aspect - 0.31f, 0.45f)
-                put(AzaharButtonIds.BUTTON_Y, 0.11f, 0.13f, aspect - 0.46f, 0.57f)
+                val growth = 1.10f
+                val edgeInset = 0.025f
+                fun put(id: Int, base: Float, size: Float, x: Float, y: Float, scaleId: Int = id) {
+                    place(id, scaleId, base, size * growth, x, y)
+                }
+                val left = edgeInset
+                val right = aspect - edgeInset
+                val center = aspect * 0.5f
+
+                // Side groups follow the artwork on wide screens. Keep the
+                // square hit boxes apart where the artwork's outlines get close.
+                put(AzaharButtonIds.TRIGGER_L, 0.18f, 0.16f, left + 0.172f, 0.155f)
+                put(AzaharButtonIds.BUTTON_ZL, 0.18f, 0.16f, left + 0.176f, 0.338f)
+                put(AzaharButtonIds.DPAD_UP, 0.22f, 0.20f, left + 0.208f, 0.544f, AzaharButtonIds.DPAD)
+                put(AzaharButtonIds.STICK_LEFT, 0.275f, 0.28f, left + 0.232f, 0.814f)
+
+                put(AzaharButtonIds.BUTTON_HOME, 0.08f, 0.11f, right - 0.084f, 0.103f)
+                put(AzaharButtonIds.BUTTON_ZR, 0.18f, 0.16f, right - 0.385f, 0.182f)
+                put(AzaharButtonIds.TRIGGER_R, 0.18f, 0.20f, right - 0.172f, 0.283f)
+                put(AzaharButtonIds.BUTTON_X, 0.11f, 0.13f, right - 0.366f, 0.454f)
+                put(AzaharButtonIds.BUTTON_Y, 0.11f, 0.13f, right - 0.526f, 0.585f)
+                put(AzaharButtonIds.BUTTON_A, 0.11f, 0.13f, right - 0.206f, 0.585f)
+                put(AzaharButtonIds.BUTTON_B, 0.11f, 0.13f, right - 0.375f, 0.716f)
                 // The overlay applies an additional 0.5 scale to the C-stick.
-                put(AzaharButtonIds.STICK_C, 0.1375f, 0.17f, aspect - 0.14f, 0.83f)
-                put(AzaharButtonIds.BUTTON_SELECT, 0.08f, 0.16f, aspect * 0.5f - 0.09f, 0.88f)
-                put(AzaharButtonIds.BUTTON_START, 0.08f, 0.16f, aspect * 0.5f + 0.09f, 0.88f)
+                put(AzaharButtonIds.STICK_C, 0.1375f, 0.17f, right - 0.175f, 0.828f)
+
+                put(AzaharButtonIds.BUTTON_SELECT, 0.08f, 0.16f, center - 0.137f, 0.879f)
+                put(AzaharButtonIds.BUTTON_START, 0.08f, 0.16f, center + 0.137f, 0.879f)
                 return editor
             }
             // About 9 mm on S25; keep the square hit boxes separated as well as the discs.
