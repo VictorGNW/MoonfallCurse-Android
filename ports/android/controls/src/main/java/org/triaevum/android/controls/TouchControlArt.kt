@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Typeface
 
 /** Draws a sprite within the existing control's hit box, preserving its aspect ratio. */
 class TouchControlArt(private val bitmap: Bitmap, private val sprites: Map<Int, Rect>) {
@@ -18,9 +19,27 @@ class TouchControlArt(private val bitmap: Bitmap, private val sprites: Map<Int, 
         style = Paint.Style.STROKE
     }
 
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 220, 252)
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+    }
+
+    internal fun drawShortcut(canvas: Canvas, button: InputOverlayDrawableButton): Boolean {
+        val glyph = EmulationMenuSettings.shortcut(button.id).glyph
+        if (glyph.isEmpty() || !draw(canvas, button.id, button.bounds, button.opacity,
+                button.status == AzaharButtonState.PRESSED)) return false
+        val bounds = button.bounds
+        label.alpha = paint.alpha
+        label.textSize = bounds.height() * if (glyph.length > 2) 0.25f else 0.43f
+        canvas.drawText(glyph, bounds.exactCenterX(),
+            bounds.exactCenterY() - (label.ascent() + label.descent()) / 2f, label)
+        return true
+    }
+
     internal fun drawStick(canvas: Canvas, joystick: InputOverlayDrawableJoystick): Boolean {
         val pressed = joystick.trackId != -1
-        if (!draw(canvas, joystick.joystickId, joystick.bounds, joystick.opacity, pressed)) return false
+        if (!draw(canvas, joystick.joystickId, joystick.visualBounds, joystick.opacity, pressed)) return false
         if (pressed) {
             val bounds = joystick.thumbBounds
             val radius = minOf(joystick.bounds.width(), joystick.bounds.height()) * 0.10f

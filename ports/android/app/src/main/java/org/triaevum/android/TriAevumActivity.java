@@ -73,7 +73,7 @@ public final class TriAevumActivity extends SDLActivity {
     /** The touch controls above the game surface, the same size, without taking key focus. */
     private void attachTouchControls() {
         touchInput = new TouchOverlayInput();
-        touchAdapter = new AzaharInputAdapter(touchInput);
+        touchAdapter = touchInput.createAdapter();
         // The overlay reads its preferences through the bound host while it is built.
         OverlayHost.INSTANCE.bind(this, touchAdapter);
         touchOverlay = new InputOverlay(this, null);

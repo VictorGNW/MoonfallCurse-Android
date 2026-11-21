@@ -79,6 +79,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
         super.draw(canvas)
         val art = controlArt
         overlayButtons.forEach { button ->
+            if (button.id in TouchShortcut.slots && art?.drawShortcut(canvas, button) == true) return@forEach
             if (art?.draw(canvas, button.id, button.bounds, button.opacity,
                     button.status == AzaharButtonState.PRESSED) != true &&
                 (isInEditMode || !OverlayHost.drawsControl(button.id))) button.draw(canvas)
@@ -91,6 +92,20 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             if (art?.drawStick(canvas, joystick) != true &&
                 (isInEditMode || !OverlayHost.drawsControl(joystick.joystickId))) joystick.draw(canvas)
         }
+    }
+
+    private fun expandedButtonAt(x: Int, y: Int): InputOverlayDrawableButton? {
+        if (!EmulationMenuSettings.expandedMainButtons ||
+            overlayButtons.any { it.bounds.contains(x, y) } ||
+            overlayDpads.any { it.bounds.contains(x, y) } ||
+            overlayJoysticks.any { it.bounds.contains(x, y) }) return null
+        return overlayButtons.asSequence()
+            .filter { it.id in MAIN_BUTTONS && it.trackId == -1 && it.containsExpanded(x, y) }
+            .minWithOrNull(compareBy<InputOverlayDrawableButton> {
+                val dx = it.bounds.centerX() - x
+                val dy = it.bounds.centerY() - y
+                dx * dx + dy * dy
+            }.thenBy { it.id })
     }
 
     private fun swapScreen() {
@@ -212,8 +227,10 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             var anyOverlayStateChanged = false
             var shouldUpdateView = false
             if(!hasActiveDpad && !hasActiveJoystick) {
+                val expanded = if (isActionDown && !hasActiveButtons)
+                    expandedButtonAt(xPosition, yPosition) else null
                 for (button in overlayButtons) {
-                    val stateChanged = button.updateStatus(event, pointerIndex, hasActiveButtons, this)
+                    val stateChanged = button.updateStatus(event, pointerIndex, hasActiveButtons, this, button === expanded)
                     if (!stateChanged) {
                         continue
                     }
@@ -436,6 +453,12 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
     }
 
     private fun addOverlayControls(orientation: String) {
+        for (id in TouchShortcut.slots) {
+            if (EmulationMenuSettings.shortcut(id) != TouchShortcut.OFF) {
+                overlayButtons.add(initializeOverlayButton(
+                    context, R.drawable.button_a, R.drawable.button_a_pressed, id, orientation))
+            }
+        }
         if (preferences.getBoolean("buttonToggle0", true)) {
             overlayButtons.add(
                 initializeOverlayButton(
@@ -702,6 +725,13 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
 
     fun resetButtonPlacement() {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val orientation = if (isLandscape) "" else "-Portrait"
+        preferences.edit().apply {
+            for (id in TouchShortcut.slots) {
+                remove("$id$orientation-X")
+                remove("$id$orientation-Y")
+            }
+        }.apply()
         if (isLandscape) {
             defaultOverlayLandscape()
         } else {
@@ -1014,6 +1044,11 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
     }
 
     companion object {
+        private val MAIN_BUTTONS = setOf(
+            AzaharButtonIds.BUTTON_A, AzaharButtonIds.BUTTON_B, AzaharButtonIds.BUTTON_X,
+            AzaharButtonIds.BUTTON_Y, AzaharButtonIds.TRIGGER_L, AzaharButtonIds.TRIGGER_R,
+        )
+
         private val preferences
             get() = PreferenceManager.getDefaultSharedPreferences(OverlayHost.appContext)
 
@@ -1146,10 +1181,16 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
             // These were set in the input overlay configuration menu.
             val xKey = "$buttonId$orientation-X"
             val yKey = "$buttonId$orientation-Y"
-            val drawableX = preferences.getFloat(xKey, 0f).toInt()
-            val drawableY = preferences.getFloat(yKey, 0f).toInt()
             val width = overlayDrawable.width
             val height = overlayDrawable.height
+            val metrics = res.displayMetrics
+            val short = min(metrics.widthPixels, metrics.heightPixels)
+            val slotOffset = buttonId - TouchShortcut.FIRST_ID - 1
+            val defaultX = if (buttonId in TouchShortcut.slots)
+                metrics.widthPixels / 2f + slotOffset * short * 0.14f - width / 2f else 0f
+            val defaultY = if (buttonId in TouchShortcut.slots) short * 0.065f else 0f
+            val drawableX = preferences.getFloat(xKey, defaultX).toInt()
+            val drawableY = preferences.getFloat(yKey, defaultY).toInt()
 
             // Now set the bounds for the InputOverlayDrawableButton.
             // This will dictate where on the screen (and the what the size) the InputOverlayDrawableButton will be.

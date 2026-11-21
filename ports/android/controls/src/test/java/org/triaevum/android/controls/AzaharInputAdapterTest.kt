@@ -84,6 +84,27 @@ class AzaharInputAdapterTest {
         assertEquals(0f to 0f, target.right)
     }
 
+    @Test fun shortcutsPreserveSharedButtonsAndReleaseTheirOriginalBinding() {
+        val target = Target()
+        val adapter = AzaharInputAdapter(target)
+        val first = TouchShortcut.FIRST_ID
+        val second = first + 1
+        adapter.shortcutFor = { if (it == first) TouchShortcut.ITEM_I else TouchShortcut.OCARINA }
+        assertTrue(adapter.button(first, true))
+        assertEquals((1 shl 15) or (1 shl 10), target.buttons)
+        assertTrue(adapter.button(second, true))
+        assertEquals((1 shl 15) or (1 shl 10) or 1, target.buttons)
+        adapter.button(AzaharButtonIds.BUTTON_ZR, true)
+        adapter.shortcutFor = { TouchShortcut.OFF }
+        assertTrue(adapter.button(first, false))
+        assertEquals((1 shl 15) or 1, target.buttons)
+        adapter.button(second, false)
+        assertEquals(1 shl 15, target.buttons)
+        adapter.button(AzaharButtonIds.BUTTON_ZR, false)
+        assertEquals(0, target.buttons)
+        assertFalse(adapter.button(first, true))
+    }
+
     @Test fun axesMatchAzaharJniNormalization() {
         val target = Target()
         val adapter = AzaharInputAdapter(target)

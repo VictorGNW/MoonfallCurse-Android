@@ -16,15 +16,17 @@ ThreeDsRecomp::Input::VirtualPad& Pad() { return ThreeDsRecomp::Input::TouchOver
 
 extern "C" {
 
-// hidMask: one 3DS HID PAD bit (the overlay adapter's vocabulary).
+// hidMask: 3DS HID PAD bits, including simultaneous shortcut chords.
 JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_button(JNIEnv*, jobject, jint hidMask,
                                                                           jboolean pressed) {
     const auto mask = static_cast<unsigned>(hidMask);
+    std::uint32_t controls = 0;
     for (unsigned bit = 0; bit < 32U; ++bit) {
         ThreeDsRecomp::Input::DigitalControl control{};
         if ((mask & (1U << bit)) != 0U && ThreeDsRecomp::Input::DigitalControlForHidBit(bit, &control))
-            Pad().SetControl(control, pressed == JNI_TRUE);
+            controls |= ThreeDsRecomp::Input::VirtualPad::Bit(control);
     }
+    Pad().SetControls(controls, pressed == JNI_TRUE);
 }
 
 JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_circlePad(JNIEnv*, jobject, jfloat x, jfloat y) {

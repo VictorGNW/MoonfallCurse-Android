@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Rect
 import org.triaevum.android.controls.AzaharButtonIds as Button
 import org.triaevum.android.controls.TouchControlArt
+import org.triaevum.android.controls.TouchShortcut
 
 internal class MoonfallTouchArt(context: Context) {
     val standard = TouchControlArt(BitmapFactory.decodeResource(context.resources, R.drawable.moonfall_touch_standard),
@@ -23,7 +24,7 @@ internal class MoonfallTouchArt(context: Context) {
             Button.BUTTON_A to Rect(1393, 470, 1559, 635),
             Button.BUTTON_B to Rect(1235, 594, 1402, 756),
             Button.STICK_C to Rect(1399, 673, 1614, 885),
-        ))
+        ) + TouchShortcut.slots.associateWith { Rect(148, 663, 287, 801) })
     val zora = TouchControlArt(BitmapFactory.decodeResource(context.resources, R.drawable.moonfall_touch_zora),
         mapOf(
             Button.TRIGGER_L to Rect(46, 123, 275, 230),
@@ -40,5 +41,5 @@ internal class MoonfallTouchArt(context: Context) {
             Button.BUTTON_A to Rect(1379, 457, 1553, 624),
             Button.BUTTON_B to Rect(1219, 576, 1392, 746),
             Button.STICK_C to Rect(1398, 656, 1617, 873),
-        ))
+        ) + TouchShortcut.slots.associateWith { Rect(143, 647, 283, 788) })
 }

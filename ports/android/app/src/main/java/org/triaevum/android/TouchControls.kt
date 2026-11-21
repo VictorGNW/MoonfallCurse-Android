@@ -1,6 +1,7 @@
 package org.triaevum.android
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.hardware.input.InputManager
 import android.os.Handler
@@ -13,7 +14,9 @@ import android.widget.Button
 import android.widget.LinearLayout
 import org.triaevum.android.controls.AzaharButtonIds
 import org.triaevum.android.controls.AzaharInputAdapter
+import org.triaevum.android.controls.EmulationMenuSettings
 import org.triaevum.android.controls.InputOverlay
+import org.triaevum.android.controls.TouchShortcut
 import org.triaevum.android.controls.Native3dsInputTarget
 
 /** JNI entry points in libTriAevum.so (ports/android/runtime/android_input_bridge.cpp). */
@@ -86,6 +89,10 @@ class TouchOverlayInput : Native3dsInputTarget {
             applyRequests()
             handler.postDelayed(this, TITLE_POLL_MS)
         }
+    }
+
+    fun createAdapter() = AzaharInputAdapter(this).apply {
+        if (BuildConfig.FLAVOR == "mc") shortcutFor = EmulationMenuSettings::shortcut
     }
 
     override fun button(hidMask: Int, pressed: Boolean) = NativeInputBridge.button(hidMask, pressed)
@@ -206,6 +213,10 @@ class TouchOverlayInput : Native3dsInputTarget {
             val bar = LinearLayout(host).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(reset)
+                addView(Button(host).apply {
+                    text = "Options"
+                    setOnClickListener { showEditorOptions(host, view) }
+                })
                 addView(done)
             }
             layout.addView(bar, ViewGroup.LayoutParams(
@@ -227,6 +238,56 @@ class TouchOverlayInput : Native3dsInputTarget {
         }
         restartIdleTimer()
         view.invalidate()
+    }
+
+    private fun showEditorOptions(host: Activity, view: InputOverlay) {
+        val settings = EmulationMenuSettings
+        val options = mutableListOf(
+            "Analog stick · " + if (settings.joystickRelCenter) "Floating" else "Fixed",
+            "Larger main button touch areas · " + if (settings.expandedMainButtons) "On" else "Off",
+        )
+        if (BuildConfig.FLAVOR == "mc") {
+            TouchShortcut.slots.forEachIndexed { index, id ->
+                options.add("Shortcut ${index + 1} · ${settings.shortcut(id).label}")
+            }
+        }
+        AlertDialog.Builder(host)
+            .setTitle("Touch layout options")
+            .setItems(options.toTypedArray()) { _, index ->
+                when (index) {
+                    0 -> AlertDialog.Builder(host)
+                        .setTitle("Analog stick")
+                        .setSingleChoiceItems(arrayOf("Fixed", "Floating"), if (settings.joystickRelCenter) 1 else 0) { dialog, choice ->
+                            settings.joystickRelCenter = choice == 1
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                    1 -> AlertDialog.Builder(host)
+                        .setTitle("Larger main button touch areas")
+                        .setSingleChoiceItems(arrayOf("Off", "On"), if (settings.expandedMainButtons) 1 else 0) { dialog, choice ->
+                            settings.expandedMainButtons = choice == 1
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                    else -> {
+                        val id = TouchShortcut.FIRST_ID + index - 2
+                        val actions = TouchShortcut.entries
+                        AlertDialog.Builder(host)
+                            .setTitle("Shortcut ${index - 1}")
+                            .setSingleChoiceItems(actions.map { it.label }.toTypedArray(), settings.shortcut(id).ordinal) { dialog, choice ->
+                                settings.setShortcut(id, actions[choice])
+                                view.refreshControls()
+                                dialog.dismiss()
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun checkControllers() {
