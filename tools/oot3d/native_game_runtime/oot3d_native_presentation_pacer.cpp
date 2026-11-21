@@ -118,11 +118,23 @@ void NativeRealtimeRefreshPacer::WaitForNextRefresh() {
     if (!mStarted) {
         mStarted = true;
         mNextDeadline = std::chrono::steady_clock::now();
+#if defined(__ANDROID__)
+        mLastPacingRelease = mNextDeadline;
+#endif
         return;
     }
 
     const auto period = NextPeriod();
     mNextDeadline += period;
+#if defined(__ANDROID__)
+    // Avoid short catch-up frames after a stall at native 30 Hz. Keep the
+    // absolute clock for normal wake-up jitter, allowing at most 1 ms of
+    // correction on the next frame.
+    if (mTargetRateHz == 30U) {
+        mNextDeadline = std::max(mNextDeadline,
+            mLastPacingRelease + period - std::chrono::milliseconds(1));
+    }
+#endif
     auto now = std::chrono::steady_clock::now();
     mLastSlack = std::chrono::duration_cast<std::chrono::nanoseconds>(mNextDeadline - now);
     if (now >= mNextDeadline) {
@@ -146,6 +158,9 @@ void NativeRealtimeRefreshPacer::WaitForNextRefresh() {
         } else {
             ++mStats.CarriedDeadlineDebt;
         }
+#if defined(__ANDROID__)
+        mLastPacingRelease = now;
+#endif
         return;
     }
 
@@ -169,6 +184,9 @@ void NativeRealtimeRefreshPacer::WaitForNextRefresh() {
     mStats.SpinSeconds +=
         std::chrono::duration<double>(now - spinStart).count();
     ++mStats.Waits;
+#if defined(__ANDROID__)
+    mLastPacingRelease = now;
+#endif
 }
 
 void NativeRealtimeRefreshPacer::ObservePresentation(
@@ -191,6 +209,20 @@ void NativeRealtimeRefreshPacer::ObservePresentation(
 #if defined(__ANDROID__)
     // At 30 Hz the normal 33 ms interval crosses the desktop diagnostic
     // threshold. Allow cadence jitter and limit synchronous stderr writes.
+    if (mEnabled && mTargetRateHz == 30U) {
+        const double intervalMs = interval * 1000.0;
+        ++mTimingSamples;
+        mTimingTotal += intervalMs;
+        mTimingMax = std::max(mTimingMax, intervalMs);
+        if (std::abs(intervalMs - 1000.0 / 30.0) <= 2.0) ++mTimingNearTarget;
+        if (mTimingSamples == 120U) {
+            std::fprintf(stderr,
+                "TRIAEVUM_PACING target_ms=33.33 submit_mean_ms=%.2f submit_max_ms=%.2f within_2ms=%u/%u\n",
+                mTimingTotal / mTimingSamples, mTimingMax, mTimingNearTarget, mTimingSamples);
+            mTimingSamples = mTimingNearTarget = 0;
+            mTimingTotal = mTimingMax = 0;
+        }
+    }
     const double hitchThreshold = mTargetRateHz != 0U
         ? std::max(0.025, 1.5 / static_cast<double>(mTargetRateHz))
         : 0.050;
@@ -226,6 +258,10 @@ void NativeRealtimeRefreshPacer::ResetDeadline() noexcept {
     mHasPresentationTime = false;
     mNextDeadline = std::chrono::steady_clock::now();
     mNanosecondRemainder = 0;
+#if defined(__ANDROID__)
+    mTimingSamples = mTimingNearTarget = 0;
+    mTimingTotal = mTimingMax = 0;
+#endif
 }
 
 bool NativeRealtimeRefreshPacer::Enabled() const noexcept {

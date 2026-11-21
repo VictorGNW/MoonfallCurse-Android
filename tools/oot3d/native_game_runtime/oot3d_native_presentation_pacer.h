@@ -83,6 +83,11 @@ class NativeRealtimeRefreshPacer final {
     std::chrono::steady_clock::time_point mLastPresentationTime;
 #if defined(__ANDROID__)
     std::chrono::steady_clock::time_point mNextHitchLogTime{};
+    std::chrono::steady_clock::time_point mLastPacingRelease;
+    unsigned mTimingSamples = 0;
+    unsigned mTimingNearTarget = 0;
+    double mTimingTotal = 0;
+    double mTimingMax = 0;
 #endif
     NativeRealtimeRefreshPacerStats mStats;
     std::chrono::nanoseconds mLastSlack{0};

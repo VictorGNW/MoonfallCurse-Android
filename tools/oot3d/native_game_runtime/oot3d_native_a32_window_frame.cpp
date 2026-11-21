@@ -287,9 +287,11 @@ bool NativeA32WindowSession::RunFrame() {
     mainPerformanceHint.UpdateTarget(period);
   }
   const auto presentationTime = std::chrono::steady_clock::now();
+#if !defined(__ANDROID__)
   renderStream.Submit([&, presentationTime] {
     realtimePacer.ObservePresentation(presentationTime);
   });
+#endif
   const double presentationElapsedSeconds =
       hostArgs.FixedDeltaSeconds > 0.0
           ? hostArgs.FixedDeltaSeconds
@@ -1055,6 +1057,9 @@ bool NativeA32WindowSession::RunFrame() {
     const auto waitEnd = std::chrono::steady_clock::now();
     rendererTiming->PacingWaitSeconds +=
         std::chrono::duration<double>(waitEnd - waitStart).count();
+#if defined(__ANDROID__)
+    realtimePacer.ObservePresentation(waitEnd);
+#endif
     window.EndFrame();
     inputLatencyTrace.ObserveFrameEnd(presentationSerial, waitStart, waitEnd,
                                       std::chrono::steady_clock::now());
