@@ -1,0 +1,69 @@
+# Build MM3D-Android
+
+MM3D-Android uses TriAevum's **Moonfall Curse** Android flavor (`mc`), whose package ID is `org.triaevum.moonfallcurse`. The APK contains the ARM64 runtime, a precompiled title module and Forge. On the phone, Forge uses the system file picker and prepares the game from your own decrypted **EUR** cartridge dump matching the [supported revision catalog](../../titles/mm3d/forge/supported_revisions.json). The USA v1.1 dump documented by MM3D-Mobile was used with the older prototype.
+
+## Prepare the publisher build
+
+Use a Linux x86-64 host with Android SDK Platform 35, NDK r29, JDK 17, Gradle 8.13, CMake 3.30 or newer, Ninja, Python 3, Rust/Cargo with the `aarch64-linux-android` target, and ADB.
+
+The build needs the verified translated sources and reference package from the matching Moonfall Curse desktop release, its full source commit ID and the generated A32 registry directory `a32_generated_overlay_r18`. Run this from the checkout root after setting the indicated paths and commit:
+
+```bash
+python3 tools/android/android_release.py --title mm3d \
+  --ndk "$ANDROID_NDK_HOME" \
+  --work "$MM3D_BUILD" \
+  --translated-sources "$MM3D_TRANSLATED_SOURCES" \
+  --a32-registry "$MM3D_A32_REGISTRY" \
+  --reference-package "$MM3D_DESKTOP_PACKAGE" \
+  --source-commit "$MM3D_SOURCE_COMMIT" \
+  --gradle "$GRADLE"
+```
+
+Use a build directory outside the checkout. The command prints the build recipe. Append `--run` to execute it after setting up the signing inputs in the [Android release guide](../../docs/TRIAEVUM_ANDROID_RELEASE.md). Gradle uses `:app:assembleMcRelease` and writes its APK under `ports/android/app/build/outputs/apk/mc/release/`. Follow the release guide to audit the package before installing it. Forge verifies the signature of its install package on the phone.
+
+## Install and verify on a phone
+
+Enable USB debugging, connect the phone and accept the ADB prompt. For a signed APK, set `MM3D_APK` to its path:
+
+```bash
+adb devices -l
+adb install -r "$MM3D_APK"
+```
+
+Open **Moonfall Curse** and select your own compatible dump. The installer can prepare known shaders and Vulkan pipelines before you play. This option starts enabled and makes installation take longer, uses extra cache space and may warm up the phone. Turn it off to skip the optional device-pipeline warmup; Forge still prepares the required game data and portable shader pack.
+
+On a test device, verify first launch, gameplay, saving and reloading, overlay editing, controller input and background/resume. The Android release guide tracks the remaining qualification checks.
+
+If startup fails, collect the app's diagnostics or read the native logs:
+
+```bash
+MM3D_DATA=/sdcard/Android/data/org.triaevum.moonfallcurse/files
+adb shell cat "$MM3D_DATA/data/logs/native-stdout.log"
+adb shell cat "$MM3D_DATA/data/logs/native-stderr.log"
+```
+
+## Standalone Vulkan diagnostic
+
+The `triaevum_android_nri_present_probe` target builds an ARM64 NativeActivity library that draws a triangle and tests Vulkan swapchain presentation independently of a ROM. Set `NATIVE_PROBE_BUILD` to a fresh build directory outside the checkout, then configure and build the probe:
+
+```bash
+cmake -S ports/android/native -B "$NATIVE_PROBE_BUILD" -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+  -DANDROID_STL=c++_shared -DTRIAEVUM_ANDROID_BUILD_NRI=ON \
+  -DTRIAEVUM_ANDROID_BUILD_NRI_PRESENT_PROBE=ON
+cmake --build "$NATIVE_PROBE_BUILD" --target triaevum_android_nri_present_probe
+```
+
+A NativeActivity test APK must bundle the library, the matching ARM64 `libc++_shared.so` and a native activity with `android.app.lib_name` set to `triaevum_android_nri_present_probe`. Check the resulting `NriPresentProbe` messages in logcat. See [Device Verification](README.md#device-verification) for the separate NRI device/queue probe.
+
+## Private MM3D-Mobile diagnostics
+
+`tools/android/prepare_mm3d_data.py` stages a completed legacy MM3D-PC Setup installation for offline testing with a compatible developer runtime. It copies private inputs and writes a launch profile, so run it only with an output directory outside the checkout and separate from the installation:
+
+```bash
+python3 tools/android/prepare_mm3d_data.py \
+  --installation "$MM3D_LEGACY_INSTALL" --output "$MM3D_LEGACY_STAGE"
+```
+
+The legacy staging directory contains ROM-derived data. Keep it private and use the Forge workflow above for Moonfall Curse.
