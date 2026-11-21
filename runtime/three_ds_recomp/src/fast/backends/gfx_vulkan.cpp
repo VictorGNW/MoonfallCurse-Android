@@ -634,7 +634,14 @@ void GfxRenderingAPIVulkan::RenderImGuiDrawData(ImDrawData* drawData) {
 }
 
 void GfxRenderingAPIVulkan::OnResize() {
+#if defined(__ANDROID__)
+    // Android may send resize events without changing the Vulkan surface.
+    // Check the actual configuration at the start of the next frame before
+    // discarding the swapchain; OUT_OF_DATE still forces a rebuild.
+    mSwapchainSuboptimal.store(true);
+#else
     mSwapchainDirty = true;
+#endif
 }
 
 bool GfxRenderingAPIVulkan::PublishSceneView(

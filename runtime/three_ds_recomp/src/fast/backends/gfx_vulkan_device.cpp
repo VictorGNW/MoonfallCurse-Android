@@ -1490,12 +1490,11 @@ void GfxRenderingAPIVulkan::RecreateSwapchain() {
         mSwapchainDirty = true;
         return;
     }
-    // A resize usually comes with a new internal extent; pooled GPU-copy images
-    // are idle by construction, so dropping them here is always safe.
-    ReleaseGpuCopyImagePool();
     WaitForAllPresents();
     StopPresentWorker();
     CheckVk(vkDeviceWaitIdle(mDevice), "vkDeviceWaitIdle(recreate swapchain)");
+    // Release pooled images only after the driver confirms all work is idle.
+    ReleaseGpuCopyImagePool();
     // Native PICA targets are offscreen scene resources, not swapchain
     // resources. Preserve them (and AO depth bindings) across presentation
     // mode changes; their own reset path handles genuine scene invalidation.

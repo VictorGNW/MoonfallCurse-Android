@@ -662,6 +662,7 @@ void GfxRenderingAPIVulkan::StartFrame() {
     mSpatialAaMode = aaPolicy.SpatialAaMode;
     if (mVsyncEnabled != graphicsSettings.VSync) {
         mVsyncEnabled = graphicsSettings.VSync;
+        std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=vsync\n");
         mSwapchainDirty = true;
     }
     markStart(0);
@@ -684,10 +685,13 @@ void GfxRenderingAPIVulkan::StartFrame() {
     }
 #endif
     if (mPresentSwapchainDirty.exchange(false)) {
+        std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=async_present_out_of_date\n");
         mSwapchainDirty = true;
     }
     if (mSwapchainSuboptimal.exchange(false) && !mSwapchainDirty) {
         mSwapchainDirty = SwapchainSurfaceChanged();
+        if (mSwapchainDirty)
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=surface_changed\n");
     }
     const auto presentError = static_cast<VkResult>(mPresentError.exchange(VK_SUCCESS));
     if (presentError != VK_SUCCESS) {
@@ -764,6 +768,7 @@ void GfxRenderingAPIVulkan::StartFrame() {
                 mNriSwapchain.Acquire(mCurrentFrame, mCurrentImage);
             if (result ==
                 Extension::NriSwapchainOperationResult::OutOfDate) {
+                std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=nri_acquire_out_of_date\n");
                 mSwapchainDirty = true;
                 // Let the host pump window events before retrying acquisition.
                 return;
@@ -791,6 +796,7 @@ void GfxRenderingAPIVulkan::StartFrame() {
             return;
         }
         if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=acquire_out_of_date\n");
             mSwapchainDirty = true;
             return;
         }
@@ -1033,6 +1039,7 @@ void GfxRenderingAPIVulkan::FinishRender() {
     } else if (mNriSwapchain.Active()) {
         const auto result = mNriSwapchain.Present(mCurrentImage);
         if (result == Extension::NriSwapchainOperationResult::OutOfDate) {
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=nri_present_out_of_date\n");
             mSwapchainDirty = true;
         } else if (result !=
                    Extension::NriSwapchainOperationResult::Success) {
@@ -1070,6 +1077,7 @@ void GfxRenderingAPIVulkan::FinishRender() {
             present = vkQueuePresentKHR(mPresentQueue, &presentInfo);
         }
         if (present == VK_ERROR_OUT_OF_DATE_KHR) {
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=present_out_of_date\n");
             mSwapchainDirty = true;
         } else if (present == VK_SUBOPTIMAL_KHR) {
             mSwapchainSuboptimal.store(true);
