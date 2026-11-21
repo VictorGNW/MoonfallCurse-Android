@@ -14,6 +14,22 @@ Follow the [MM3D Android build guide](ports/android/MM3D.md) for the Moonfall Cu
 
 When reporting an issue, include the APK or commit version, phone model, Android version, GPU, reproduction steps and the relevant diagnostics. The build guide shows how to collect logs with ADB.
 
+## Samsung Xclipse 540 installer test
+
+Forge leaves **Prepare known shaders before playing** unchecked by default on new
+installs. This optional step creates Vulkan pipelines in the installer process
+and can increase memory pressure. Existing preferences are kept, so uncheck it
+manually if you previously enabled it. Skipping this step can increase stutter
+during the first play session.
+
+This mitigation is awaiting device validation. On a Samsung SM-A566E with
+Xclipse 540, install from your own decrypted dump with the option unchecked,
+then launch the game and check whether it reaches the first rendered frame.
+If installation or launch fails, reopen the app and export Diagnostics with the
+Forge log. Include the APK version, whether shader preparation was enabled, and
+the last observed Forge stage. If ADB is available, collect the native crash
+message with `adb logcat -b crash -d`.
+
 ## Credits and licensing
 
 Thanks to the [TriAevum](https://github.com/coccofresco/TriAevum) contributors, the [MM3D-PC](https://github.com/Volpe34/MM3D-PC) project that provided the basis for MM3D-Mobile, and the [Azahar](https://github.com/azahar-emu/azahar) contributors whose overlay is used by the Android app. See the [third-party notices](THIRD_PARTY_NOTICES.md) and [license scope](LICENSE_SCOPE.md) for component credits and terms.

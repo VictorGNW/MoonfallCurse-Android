@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Binder
 import android.os.Build
+import android.os.Debug
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -148,6 +149,9 @@ class InstallService : Service() {
         }
         val rom = document?.let { RomDocument(it, name, language) }
         return begin(ForgeJob.INSTALL, getString(R.string.forge_preparing, name), rom) {
+            getSharedPreferences(CHECKPOINT, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_PREWARM, prewarm)
+                .commit()
             installRequest(descriptor, language, prewarm)
         }.also { if (!it) descriptor.close() }
     }
@@ -333,6 +337,17 @@ class InstallService : Service() {
                 val event = JSONObject(String(bytes))
                 when (event.optString("event")) {
                     "succeeded", "failed", "cancelled" -> return event
+                    "stage" -> {
+                        val stage = event.optString("stage")
+                        if (stage.isNotEmpty()) {
+                            // Persist before posting to the UI so the next launch can report it.
+                            val heapMiB = Debug.getNativeHeapAllocatedSize() shr 20
+                            getSharedPreferences(CHECKPOINT, Context.MODE_PRIVATE).edit()
+                                .putString(KEY_STAGE, "$stage (native heap ${heapMiB} MiB)")
+                                .commit()
+                        }
+                        main.post { progress(event) }
+                    }
                     else -> main.post { progress(event) }
                 }
             }
@@ -576,6 +591,7 @@ class InstallService : Service() {
             .putString(KEY_JOB, kind?.code)
             .putString(KEY_MESSAGE, message.take(300))
             .putLong(KEY_TIME, System.currentTimeMillis())
+        if (state == STATE_RUNNING) editor.remove(KEY_STAGE).remove(KEY_PREWARM)
         if (kind == ForgeJob.INSTALL && state == STATE_RUNNING) {
             editor.putString(KEY_ROM_URI, rom?.uri).putString(KEY_ROM_NAME, rom?.name).putString(KEY_ROM_LANGUAGE, rom?.language)
         }
@@ -598,6 +614,8 @@ class InstallService : Service() {
         private const val KEY_JOB = "job"
         private const val KEY_MESSAGE = "message"
         private const val KEY_TIME = "time"
+        private const val KEY_STAGE = "last_stage"
+        private const val KEY_PREWARM = "pipeline_prewarm"
         private const val KEY_ROM_URI = "rom_uri"
         private const val KEY_ROM_NAME = "rom_name"
         private const val KEY_ROM_LANGUAGE = "rom_language"
@@ -641,7 +659,15 @@ class InstallService : Service() {
             val job = preferences.getString(KEY_JOB, null) ?: "install"
             val time = java.time.Instant.ofEpochMilli(preferences.getLong(KEY_TIME, 0))
             val message = preferences.getString(KEY_MESSAGE, "").orEmpty()
-            return "$job $state at $time" + if (message.isEmpty()) "" else " ($message)"
+            return buildString {
+                append("$job $state at $time")
+                if (message.isNotEmpty()) append(" ($message)")
+                if (preferences.contains(KEY_PREWARM)) {
+                    append("; Vulkan pipeline prewarm requested: ")
+                    append(preferences.getBoolean(KEY_PREWARM, false))
+                }
+                preferences.getString(KEY_STAGE, null)?.let { append("; last observed Forge stage: $it") }
+            }
         }
     }
 }

@@ -1508,7 +1508,8 @@ class InstallerActivity : Activity() {
             buttonTintList = ColorStateList.valueOf(ACCENT_COLOR)
             minHeight = dp(48)
             visibility = CheckBox.GONE
-            isChecked = preferences.getBoolean("prewarm_pipelines", true)
+            // Driver pipeline preparation can use substantial memory in the Forge process.
+            isChecked = preferences.getBoolean("prewarm_pipelines", false)
             setOnCheckedChangeListener { _, checked ->
                 preferences.edit().putBoolean("prewarm_pipelines", checked).apply()
             }

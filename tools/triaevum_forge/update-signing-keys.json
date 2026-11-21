@@ -7,6 +7,12 @@
       "algorithm": "ed25519",
       "public_key": "d1174b011a2b24a56f617f2a366338fbb017dc6f6375ae1b78bee06261bb8e64",
       "comment": "TriAevum release key 2026"
+    },
+    {
+      "key_id": "c0f4b273658b898f",
+      "algorithm": "ed25519",
+      "public_key": "9b7e5027b8515def55895185dc94f5bfa136ed2dd71c9b90182869bfb82f1e04",
+      "comment": "Moonfall Curse Android publisher"
     }
   ]
 }
