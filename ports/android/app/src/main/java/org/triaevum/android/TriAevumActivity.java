@@ -109,29 +109,13 @@ public final class TriAevumActivity extends SDLActivity {
         if (touchInput != null) touchInput.resume();
     }
 
-    // A controller hides the touch controls (when the user wants that); a touch shows them.
-    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
-        if (touchInput != null && isController(event.getSource())) touchInput.controllerUsed();
-        return super.dispatchKeyEvent(event);
-    }
-
-    @Override public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) {
-        if (touchInput != null && isController(event.getSource())) touchInput.controllerUsed();
-        return super.dispatchGenericMotionEvent(event);
-    }
-
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent event) {
-        if (touchInput != null) touchInput.touched();
+        if (touchInput != null) touchInput.onScreenTouch(event.getActionMasked());
         // The window's touches (overlay and game surface) arrive as they happen,
         // not batched to the next display frame, for the rest of the gesture.
         if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
             getWindow().getDecorView().requestUnbufferedDispatch(event);
         return super.dispatchTouchEvent(event);
-    }
-
-    private static boolean isController(int source) {
-        return (source & android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD
-            || (source & android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK;
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {

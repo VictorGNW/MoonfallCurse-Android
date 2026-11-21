@@ -651,7 +651,7 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) : SurfaceView(contex
     // TriAevum: where each control is, for a host that draws them. Not while
     // the layout is edited: the overlay draws every control itself then.
     private fun publishControlBounds() {
-        if (width == 0 || height == 0 || isInEditMode) return
+        if (width == 0 || height == 0 || isInEditMode || visibility != View.VISIBLE) return
         val bounds = HashMap<Int, IntArray>()
         overlayButtons.forEach { bounds[it.id] = it.bounds.run { intArrayOf(left, top, right, bottom) } }
         overlayDpads.forEach { bounds[it.upId] = it.bounds.run { intArrayOf(left, top, right, bottom) } }

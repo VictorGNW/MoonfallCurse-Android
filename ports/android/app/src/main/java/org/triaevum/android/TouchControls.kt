@@ -2,8 +2,11 @@ package org.triaevum.android
 
 import android.app.Activity
 import android.content.Context
+import android.hardware.input.InputManager
 import android.os.Handler
 import android.os.Looper
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -44,11 +47,24 @@ class TouchOverlayInput : Native3dsInputTarget {
     private var activity: Activity? = null
     private var parent: ViewGroup? = null
     private var editBar: View? = null
-    private var hiddenForController = false
+    private var inputManager: InputManager? = null
+    private var controllerConnected = false
+    private var resumed = false
+    private var touching = false
+    private var idle = false
     private var appliedRevision = 0
     private var appliedEdit = 0
     private var appliedReset = 0
     private val handler = Handler(Looper.getMainLooper())
+    private val hideAfterIdle = Runnable {
+        idle = true
+        updateVisibility()
+    }
+    private val controllerListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = checkControllers()
+        override fun onInputDeviceRemoved(deviceId: Int) = checkControllers()
+        override fun onInputDeviceChanged(deviceId: Int) = checkControllers()
+    }
     private val openSettings = Runnable {
         homeLongPressed = true
         NativeInputBridge.requestSettings()
@@ -111,6 +127,7 @@ class TouchOverlayInput : Native3dsInputTarget {
         this.activity = activity
         this.overlay = overlay
         this.parent = parent
+        inputManager = activity.getSystemService(InputManager::class.java)
         if (BuildConfig.FLAVOR == "mc") {
             val art = MoonfallTouchArt(activity)
             moonfallArt = art
@@ -151,6 +168,7 @@ class TouchOverlayInput : Native3dsInputTarget {
                 .putBoolean(HIDE_WITH_CONTROLLER, requests[5] != 0)
                 .apply()
             view.refreshControls()
+            restartIdleTimer()
             reportSettings()
         }
         if (requests[7] != appliedReset) {
@@ -173,7 +191,6 @@ class TouchOverlayInput : Native3dsInputTarget {
         if (editing == (editBar != null)) return
         if (editing) {
             view.cancelTouches()
-            showControls()
             val done = Button(host).apply {
                 text = "Done"
                 setOnClickListener { editLayout(false) }
@@ -208,32 +225,59 @@ class TouchOverlayInput : Native3dsInputTarget {
             view.setIsInEditMode(false)
             view.refreshControls()
         }
+        restartIdleTimer()
         view.invalidate()
     }
 
-    /** A game controller was used: the controls step aside while the user wants that. */
-    fun controllerUsed() {
-        val view = overlay ?: return
-        if (hiddenForController || editBar != null || preferences()?.getBoolean(HIDE_WITH_CONTROLLER, true) != true) return
-        hiddenForController = true
-        view.cancelTouches()
-        view.visibility = View.INVISIBLE
-        // Without anchors the game draws its whole HUD again.
-        controlBoundsCleared()
+    private fun checkControllers() {
+        val manager = inputManager ?: return
+        val connected = manager.inputDeviceIds.any { id ->
+            val device = manager.getInputDevice(id)
+            device != null && !device.isVirtual && (
+                device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                    device.supportsSource(InputDevice.SOURCE_JOYSTICK))
+        }
+        if (controllerConnected == connected) return
+        controllerConnected = connected
+        restartIdleTimer()
     }
 
-    /** A touch brings hidden controls back. */
-    fun touched() {
-        if (!hiddenForController) return
-        showControls()
+    /** The activity sees touches even while the overlay view is invisible. */
+    fun onScreenTouch(action: Int) {
+        when (action) {
+            MotionEvent.ACTION_DOWN -> touching = true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touching = false
+            else -> return
+        }
+        restartIdleTimer()
     }
 
-    private fun showControls() {
+    private fun hidesForController() =
+        controllerConnected && preferences()?.getBoolean(HIDE_WITH_CONTROLLER, true) == true
+
+    private fun restartIdleTimer() {
+        handler.removeCallbacks(hideAfterIdle)
+        idle = false
+        updateVisibility()
+        if (resumed && !touching && editBar == null && !hidesForController()) {
+            handler.postDelayed(hideAfterIdle, TOUCH_IDLE_MS)
+        }
+    }
+
+    private fun updateVisibility() {
         val view = overlay ?: return
-        if (!hiddenForController) return
-        hiddenForController = false
-        view.visibility = View.VISIBLE
-        view.refreshControls()
+        val visible = editBar != null ||
+            (preferences()?.getBoolean(SHOW_OVERLAY, true) == true && !idle && !hidesForController())
+        val visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        if (view.visibility == visibility) return
+        view.visibility = visibility
+        if (visible) {
+            view.refreshControls()
+        } else {
+            view.cancelTouches()
+            // Without anchors the game draws its whole HUD again.
+            controlBoundsCleared()
+        }
     }
 
     private fun controlBoundsCleared() {
@@ -243,11 +287,22 @@ class TouchOverlayInput : Native3dsInputTarget {
 
     /** Follows whether the game draws its controls while the activity is in front. */
     fun resume() {
-        handler.removeCallbacks(watchTitle)
+        if (resumed) return
+        resumed = true
+        inputManager?.registerInputDeviceListener(controllerListener, handler)
+        checkControllers()
+        restartIdleTimer()
         handler.post(watchTitle)
     }
 
-    fun pause() = handler.removeCallbacks(watchTitle)
+    fun pause() {
+        if (!resumed) return
+        resumed = false
+        touching = false
+        handler.removeCallbacks(watchTitle)
+        handler.removeCallbacks(hideAfterIdle)
+        inputManager?.unregisterInputDeviceListener(controllerListener)
+    }
 
     companion object {
         private const val LONG_PRESS_MS = 600L
@@ -258,6 +313,7 @@ class TouchOverlayInput : Native3dsInputTarget {
         private const val HIDE_WITH_CONTROLLER = "TriAevumHideWithController"
         // The game reports per frame; the overlay follows within this delay.
         private const val TITLE_POLL_MS = 150L
+        private const val TOUCH_IDLE_MS = 15_000L
 
         /**
          * First run of each layout version: the controls OoT3D uses that the donor hides by default
