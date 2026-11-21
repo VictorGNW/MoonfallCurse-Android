@@ -36,7 +36,13 @@ int main() {
         const auto wayland = ResolveVulkanQueueTopology(3, 3, 2, Mode::Automatic, "wayland");
         Require(!wayland.AsynchronousPresent && wayland.RequestedGraphicsQueueCount == 1 &&
                     wayland.PresentQueueIndex == 0, "Wayland must default to the shared queue");
-        for (const auto driver : {"x11", "windows", "cocoa", "android", ""}) {
+        const auto android = ResolveVulkanQueueTopology(3, 3, 2, Mode::Automatic, "android");
+        Require(!android.AsynchronousPresent && android.RequestedGraphicsQueueCount == 1 &&
+                    android.PresentQueueIndex == 0, "Android must default to the shared queue");
+        const auto androidAsync = ResolveVulkanQueueTopology(3, 3, 2, Mode::Asynchronous, "android");
+        Require(androidAsync.AsynchronousPresent && androidAsync.PresentQueueIndex == 1,
+                "Android must retain the explicit async override");
+        for (const auto driver : {"x11", "windows", "cocoa", ""}) {
             const auto other = ResolveVulkanQueueTopology(3, 3, 2, Mode::Automatic, driver);
             Require(other.AsynchronousPresent && other.RequestedGraphicsQueueCount == 2,
                     "unrelated surface policy changed");

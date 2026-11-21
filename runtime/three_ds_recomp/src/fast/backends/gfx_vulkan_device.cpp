@@ -640,6 +640,13 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
     mAsyncPresentSupported =
         queuePlan.AsynchronousPresent &&
         mPresentQueue != mGraphicsQueue;
+#if defined(__ANDROID__)
+    std::fprintf(stderr,
+        "TRIAEVUM_VULKAN_PRESENT_QUEUE graphics_family=%u present_family=%u "
+        "present_index=%u shared=%u async=%u\n",
+        mGraphicsQueueFamily, mPresentQueueFamily, queuePlan.PresentQueueIndex,
+        unsigned(mGraphicsQueue == mPresentQueue), unsigned(mAsyncPresentSupported));
+#endif
     mDiagnostics.SetVulkanAdapter({
         mVulkanAdapterCount, mVulkanAdapterIndex,
         mVulkanAdapterVendorId, mVulkanAdapterDeviceId,
@@ -1401,6 +1408,12 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
     mSwapchainSurfaceFormat = surfaceFormat;
     mSwapchainSuboptimal.store(false);
     mSwapchainDirty = false;
+#if defined(__ANDROID__)
+    std::fprintf(stderr,
+        "TRIAEVUM_SWAPCHAIN_CREATED width=%u height=%u images=%u mode=%d nri=%u\n",
+        mSwapchainExtent.width, mSwapchainExtent.height, imageCount,
+        nriCreated ? -1 : static_cast<int>(presentMode), unsigned(nriCreated));
+#endif
     SPDLOG_INFO(
         "OOT3D {} swapchain: {}x{}, {} images, format {}, present mode {}",
         nriCreated ? "NRI" : "Vulkan",
