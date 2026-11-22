@@ -199,3 +199,31 @@ References: [NDK downloads](https://developer.android.com/ndk/downloads/index.ht
 [16-KiB page support](https://developer.android.com/guide/practices/page-sizes),
 [platform tools](https://developer.android.com/tools/releases/platform-tools),
 [renderer architecture](../../docs/OOT3D_NRI_FIDELITY_EXTENSION_ARCHITECTURE.md).
+
+## Permanent release signing
+
+Before provisioning, check the publisher's existing release keystore and GitHub
+Actions secrets. The public Xclipse Forge test APK uses a separate test app ID.
+
+From a trusted Linux machine with an authenticated GitHub CLI, use
+`bash tools/android/provision_release_signing.sh --reuse EXISTING_KEYSTORE BACKUP.p12`
+from the repository root. If there is no existing production key, replace
+`--reuse EXISTING_KEYSTORE` with `--generate NEW_KEYSTORE.p12` to create an
+RSA-4096 key. Keep both paths outside the checkout. Put the encrypted backup on
+a separate private device or volume and keep its password in your password
+manager. The script verifies recovery of the private key before uploading the
+GitHub Actions secrets. It prints the public certificate SHA-256.
+
+For local publisher builds, export the existing four signing environment
+variables plus `TRIAEVUM_ANDROID_SIGNER_SHA256`, set to the same certificate
+fingerprint as the GitHub repository variable. When using the PKCS12 backup as
+the local keystore, its key password and store password are the same. Gradle
+compares the keystore certificate before running the release tasks. The
+publisher recipe repeats the comparison on the final APK using `apksigner`
+from Android SDK Build Tools. Use `--apksigner /path/to/apksigner` if needed.
+Use `--unsigned-candidate` to explicitly build an unsigned candidate.
+
+The manual **Check Android release signing** GitHub Actions workflow verifies
+that the secrets unlock the private key and match the public fingerprint.
+It does not run Gradle or Forge. Continue to use the existing publisher
+recipe and Forge package signature for release builds.

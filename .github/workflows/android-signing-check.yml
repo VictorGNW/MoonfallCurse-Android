@@ -1,0 +1,36 @@
+name: Check Android release signing
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  signing-check:
+    if: github.ref == 'refs/heads/MM3D-Android'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the private key and permanent certificate
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.TRIAEVUM_ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.TRIAEVUM_ANDROID_KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.TRIAEVUM_ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.TRIAEVUM_ANDROID_KEY_PASS }}
+          EXPECTED: ${{ vars.TRIAEVUM_ANDROID_SIGNER_SHA256 }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_B64:?Missing Android keystore}"
+          : "${KEYSTORE_PASS:?Missing Android keystore password}"
+          : "${KEY_ALIAS:?Missing Android key alias}"
+          : "${KEY_PASS:?Missing Android key password}"
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          keystore=$(mktemp)
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
+          keytool -certreq -keystore "$keystore" -alias "$KEY_ALIAS" \
+            -storepass:env KEYSTORE_PASS -keypass:env KEY_PASS >/dev/null
+          actual=$(keytool -exportcert -keystore "$keystore" -alias "$KEY_ALIAS" \
+            -storepass:env KEYSTORE_PASS | sha256sum | cut -d ' ' -f1)
+          [[ "$actual" == "$EXPECTED" ]]
+          printf 'Verified Android signing certificate SHA-256: %s\n' "$actual"

@@ -1,3 +1,6 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -52,6 +55,8 @@ val signingVariables = listOf("TRIAEVUM_ANDROID_KEYSTORE", "TRIAEVUM_ANDROID_KEY
 val signingEnvironment = signingVariables.associateWith { System.getenv(it) }
 val unsignedCandidate = providers.gradleProperty("triaevumUnsignedReleaseCandidate").map { it == "true" }.getOrElse(false)
 val canSign = signingEnvironment.values.all { !it.isNullOrEmpty() }
+
+val expectedSigner = providers.environmentVariable("TRIAEVUM_ANDROID_SIGNER_SHA256")
 
 android {
     namespace = "org.triaevum.android"
@@ -135,6 +140,26 @@ gradle.taskGraph.whenReady {
         val missing = signingVariables.filter { signingEnvironment[it].isNullOrEmpty() }
         throw GradleException("Release signing needs ${missing.joinToString()} in the environment " +
             "(or -PtriaevumUnsignedReleaseCandidate=true for an unsigned candidate).")
+    }
+    if (release && !unsignedCandidate) {
+        val expected = expectedSigner.orNull?.lowercase()
+        if (expected == null || !Regex("[0-9a-f]{64}").matches(expected)) {
+            throw GradleException("Set TRIAEVUM_ANDROID_SIGNER_SHA256 to the permanent APK certificate SHA-256.")
+        }
+        val keystore = KeyStore.getInstance(
+            file(signingEnvironment.getValue("TRIAEVUM_ANDROID_KEYSTORE")!!),
+            signingEnvironment.getValue("TRIAEVUM_ANDROID_KEYSTORE_PASS")!!.toCharArray()
+        )
+        val alias = signingEnvironment.getValue("TRIAEVUM_ANDROID_KEY_ALIAS")!!
+        val certificate = keystore.getCertificate(alias)
+        if (!keystore.isKeyEntry(alias) || certificate == null) {
+            throw GradleException("The Android signing alias has no key entry.")
+        }
+        val actual = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+            .joinToString("") { "%02x".format(it) }
+        if (actual != expected) {
+            throw GradleException("Android signing certificate mismatch. Expected $expected, found $actual.")
+        }
     }
 }
 tasks.register("checkNativeStage") {
