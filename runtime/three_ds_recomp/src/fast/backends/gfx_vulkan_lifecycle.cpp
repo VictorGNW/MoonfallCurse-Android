@@ -320,13 +320,16 @@ void GfxRenderingAPIVulkan::Init() {
             initialized && (flush == nullptr || std::string_view(flush) != "0")) {
             Renderer3ds::PipelineCacheFlushPolicy flushPolicy;
 #if defined(__ANDROID__)
-            // Mobile drivers can serialize a large cache snapshot with pipeline creation.
-            // Keep periodic recovery, but leave more time between full snapshots.
+            // Leave large snapshots to clean shutdown. The driver's size
+            // query lets the periodic worker skip the allocation and copy.
             flushPolicy.MinimumIntervalSeconds = 60.0;
+            constexpr uint64_t snapshotBudget = 128ULL * 1024ULL * 1024ULL;
+#else
+            constexpr uint64_t snapshotBudget = kMaximumNriPipelineCacheBytes;
 #endif
             mNriPipelineCacheFlusher.Start(
-                nriCachePath, MakePipelineCacheHeader(properties), kMaximumNriPipelineCacheBytes,
-                [this] { return mNriPicaPipelineBridge.GetPipelineCacheData(); }, flushPolicy);
+                nriCachePath, MakePipelineCacheHeader(properties), snapshotBudget,
+                [this] { return mNriPicaPipelineBridge.GetPipelineCacheData(snapshotBudget); }, flushPolicy);
         }
     }
     LoadDlssFeatureRecord();

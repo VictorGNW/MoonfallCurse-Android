@@ -63,6 +63,13 @@ or any work folder. `-PtriaevumUnsignedReleaseCandidate=true` builds an unsigned
 (`*-release-unsigned.apk`). The audit refuses that candidate unless it is told it is auditing one
 (`--allow-unsigned`). The release notes publish the signing certificate's SHA-256.
 
+Moonfall Curse updates use the same Android signing certificate as the first
+public APK. Verify its SHA-256 before publishing each build.
+
+```text
+81f0b468a67451e9b2368b42e3b7b4db2933fc8853371d311334628aec3468f7
+```
+
 ## APK audit (`tools/triaevum_release/android_release_policy.py`)
 
 The audit refuses an APK that:

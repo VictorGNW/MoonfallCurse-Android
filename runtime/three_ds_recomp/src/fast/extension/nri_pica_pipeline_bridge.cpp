@@ -115,8 +115,8 @@ bool NriPicaPipelineBridge::InitializePipelineCache(std::span<const uint8_t> dat
 #endif
     return initialized;
 }
-std::vector<uint8_t> NriPicaPipelineBridge::GetPipelineCacheData() const {
-    return mBridge.GetPipelineCacheData();
+std::vector<uint8_t> NriPicaPipelineBridge::GetPipelineCacheData(uint64_t maximumBytes) const {
+    return mBridge.GetPipelineCacheData(maximumBytes);
 }
 Renderer3ds::NriPicaPipelineStatistics NriPicaPipelineBridge::PipelineStatistics() const {
     return mBridge.PipelineStatistics();

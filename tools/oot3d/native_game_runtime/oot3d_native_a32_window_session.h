@@ -682,6 +682,7 @@ private:
   bool workerPerformanceHintTried = false;
 #if defined(__ANDROID__)
   uint32_t androidPresentationRate = ~0U;
+  bool androidMenuBackdropVisible = false;
   bool renderFrameBeganOnWorker = false;
 #endif
   std::chrono::steady_clock::time_point workerFrameAcquireEnd{};

@@ -44,6 +44,7 @@ class Fast3dWindow : public Ship::Window {
     void RunGuiOnly() override;
     void StartFrame() override;
     void EndFrame() override;
+    void EndFrame(const std::function<void()>& beforePresent);
     bool IsFrameReady() override;
     void HandleEvents() override;
     void SetCursorVisibility(bool visible) override;

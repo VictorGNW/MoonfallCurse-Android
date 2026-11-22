@@ -66,6 +66,31 @@ the cache snapshot and write timings in `native-stderr.log`. The Edge 60 had
 no Moonfall Curse installation when this pass began, so there is no fresh
 on-device comparison yet.
 
+## Edge 60 gameplay cache follow-up
+
+A gameplay capture recorded periodic NRI pipeline cache snapshots of roughly
+177 MB. Snapshot calls took 123–150 ms, followed by 433–502 ms of background
+storage work. Android now skips the periodic copy when the driver reports more
+than 128 MiB and logs `result=deferred`. It still loads the existing cache and
+stores large caches at clean shutdown. Pipelines created after the last
+periodic save can be lost if Android kills the process before shutdown.
+
+The render stream also updates the menu backdrop only when its visibility
+changes. Compare the same warmed scene in Authentic to measure frame pacing.
+The cache change reduces periodic work; sustained FPS and first-use shader
+stalls still need separate measurements.
+
+## SPIR-V reuse across APK updates
+
+The Android runtime links shaderc statically. Its persistent SPIR-V cache now
+uses a fingerprint of the compiler archive and its dependencies, along with
+the existing source, stage and compiler options. Previously the fingerprint
+included the game library itself, so unrelated changes could make the next
+run recompile shaders it had already encountered. The first upgrade to the
+new key fills the cache once. The Vulkan pipeline cache retains its separate
+driver identity checks. Cold misses can still stall the first encounter with
+an item or area.
+
 ## Installation and loading follow-up
 
 Forge uses the portable shader pack digest it already verified instead of

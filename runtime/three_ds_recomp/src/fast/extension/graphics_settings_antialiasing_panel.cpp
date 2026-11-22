@@ -8,14 +8,20 @@ namespace Fast::Extension {
 bool GraphicsSettingsPanel::DrawAntialiasingSettings(
     GraphicsSettings& settings, const GraphicsCapabilities& capabilities) {
     bool changed = false;
+#if defined(__ANDROID__)
+    ImGui::SeparatorText("Antialiasing");
+    const char* const modes[] = {"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA"};
+#else
     ImGui::SeparatorText("Antialiasing and upscaling");
     const char* const modes[] = {"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA", "NRI Upscaler"};
+#endif
     changed |= SettingsUi::ValidatedCombo<AntiAliasingMode>(
         "Mode", settings, capabilities, modes,
         [&](auto& value, auto mode) {
             value.AntiAliasing = mode;
             if (mode == AntiAliasingMode::Msaa && value.MsaaSamples < 2U)
                 value.MsaaSamples = 2U;
+#if !defined(__ANDROID__)
             if (mode == AntiAliasingMode::Upscaler) {
                 auto probe = value;
                 probe.Preset = GraphicsPreset::Custom;
@@ -30,6 +36,7 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
                     }
                 }
             }
+#endif
         }, [](const auto& value) { return value.AntiAliasing; });
 
     if (settings.AntiAliasing == AntiAliasingMode::Msaa) {
@@ -47,6 +54,7 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
         changed |= ImGui::SliderFloat("Clamp expansion", &settings.TaaClampExpansion, 0.0F, 0.5F, "%.3f");
         changed |= ImGui::SliderFloat("Sharpness", &settings.TaaSharpness, 0.0F, 1.0F, "%.2f");
     }
+#if !defined(__ANDROID__)
     if (settings.AntiAliasing == AntiAliasingMode::Upscaler) {
         const char* const providers[] = {"NVIDIA Image Scaling (NIS)", "AMD FSR", "Intel XeSS", "NVIDIA DLSS"};
         changed |= SettingsUi::ValidatedCombo<UpscalerProvider>(
@@ -75,6 +83,7 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
         if (settings.Upscaler == UpscalerProvider::Nis || settings.Upscaler == UpscalerProvider::Fsr)
             changed |= ImGui::SliderFloat("Sharpness", &settings.UpscalerSharpness, 0.0F, 1.0F, "%.2f");
     }
+#endif
     const char* const anisotropy[] = {"Off", "2x", "4x", "8x", "16x"};
     changed |= SettingsUi::ValidatedCombo<int>(
         "Anisotropic filtering", settings, capabilities, anisotropy,

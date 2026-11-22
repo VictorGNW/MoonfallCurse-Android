@@ -377,6 +377,7 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     return row;
   };
 
+  constexpr bool mobile = Fast::Extension::kGraphicsPresetHost == Fast::Extension::GraphicsPresetHost::Mobile;
   tab.Rows.push_back(Heading("Display"));
   {
     Row row;
@@ -384,22 +385,25 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     row.Kind = RowKind::Choice;
     const auto offered = Fast::Extension::BuiltInGraphicsPresets(Fast::Extension::kGraphicsPresetHost);
     const int customChoice = static_cast<int>(offered.size());
-    row.Help = "Authentic keeps the original look. Enhanced adds the modern lighting, shadows and effects. ";
-    if (Fast::Extension::kGraphicsPresetHost == Fast::Extension::GraphicsPresetHost::Mobile)
-      row.Help += "Enhanced for Mobile is Enhanced at 30 fps, with a lower internal resolution, less grass and no "
-                  "water reflections, so the phone stays cool. ";
-    row.Help += "Toon applies the cel-shaded style. Any change below makes the preset Custom; the window, "
-                "resolution, VSync and texture packs stay as they are.";
+    row.Help = mobile
+      ? "Authentic keeps the original look. Enhanced for Mobile uses 2x visual interpolation, SMAA 1x and extended draw distance."
+      : "Authentic keeps the original look. Enhanced adds modern lighting, shadows and effects. Toon applies the cel-shaded style.";
+    row.Help += " Editing preset settings makes the configuration Custom.";
     for (const auto preset : offered) row.Choices.emplace_back(Fast::Extension::GraphicsPresetDisplayName(preset));
-    row.Choices.emplace_back("Custom");
+    if (mobile) {
+      row.ChoiceFallback = "Custom";
+      row.ReapplyChoice = true;
+    } else {
+      row.Choices.emplace_back("Custom");
+      row.ChoiceAvailable = [customChoice](int value) { return value < customChoice; };
+    }
     row.Read = [this] {
       return Fast::Extension::GraphicsPresetChoiceIndex(Fast::Extension::kGraphicsPresetHost, mGraphics.Preset);
     };
     row.Write = [this, offered, customChoice](int value) -> WriteResult {
-      if (value >= customChoice) return {"Custom is the result of changing any setting", false};
+      if (value < 0 || value >= customChoice) return {"Select a built-in graphics preset", true};
       return ApplyGraphics(GraphicsSettingsService::PresetForCurrent(offered[value], mGraphics), true);
     };
-    row.ChoiceAvailable = [customChoice](int value) { return value != customChoice; };
     row.Modified = [this] { return mGraphics.Preset != mBaseline.Preset; };
     tab.Rows.push_back(std::move(row));
   }
@@ -470,9 +474,10 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     Row row;
     row.Key = "Reset display settings";
     row.Kind = RowKind::Action;
-    row.Help = "Back to a window of the default size with native render scale and no anti-aliasing or "
-               "upscaler, as after a failed start. The rest of the settings stay. A window mode change asks "
-               "you to keep it.";
+    row.Help = mobile ? "Restores native render scale and disables anti-aliasing."
+                      : "Back to a window of the default size with native render scale and no anti-aliasing or "
+                        "upscaler, as after a failed start. The rest of the settings stay. A window mode change asks "
+                        "you to keep it.";
     row.Activate = [this]() -> WriteResult {
       const auto validation = Fast::Extension::GraphicsSettingsRuntime::Instance().ResetDisplay();
       RefreshSnapshots();
@@ -498,18 +503,28 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
       settings.InternalResolutionScale = static_cast<float>(value) / 100.0F;
       return ApplyGraphics(settings, false);
     };
-    row.Available = [this] { return mGraphics.AntiAliasing != AntiAliasingMode::Upscaler; };
-    row.UnavailableReason = "The upscaler quality sets the render scale.";
+    if (!mobile) {
+      row.Available = [this] { return mGraphics.AntiAliasing != AntiAliasingMode::Upscaler; };
+      row.UnavailableReason = "The upscaler quality sets the render scale.";
+    }
     row.Modified = [this] { return mGraphics.InternalResolutionScale != mBaseline.InternalResolutionScale; };
     tab.Rows.push_back(std::move(row));
   }
+  std::vector<std::string> aaChoices{"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA"};
+  std::string aaHelp = "FXAA and SMAA smooth edges after rendering, MSAA samples the geometry, "
+                       "and Temporal AA accumulates frames.";
+  if (!mobile) {
+    aaChoices.emplace_back("NRI Upscaler");
+    aaHelp += " NRI Upscaler renders smaller and reconstructs the image.";
+  }
   tab.Rows.push_back(graphicsChoice(
-      "Anti-aliasing", "FXAA and SMAA smooth edges after rendering, MSAA samples the geometry, Temporal AA "
-                       "accumulates frames, and NRI Upscaler renders smaller and reconstructs the image.",
-      {"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA", "NRI Upscaler"},
+      "Anti-aliasing", std::move(aaHelp), std::move(aaChoices),
       [](const auto &s) { return static_cast<int>(s.AntiAliasing); },
-      [](auto &s, int value) { s.AntiAliasing = static_cast<AntiAliasingMode>(value); }));
-  {
+      [](auto &s, int value) {
+        s.AntiAliasing = static_cast<AntiAliasingMode>(value);
+        if (s.AntiAliasing == AntiAliasingMode::Msaa && s.MsaaSamples < 2U) s.MsaaSamples = 2U;
+      }));
+  if (!mobile) {
     auto row = graphicsChoice(
         "Upscaler", "The reconstruction used by NRI Upscaler: NIS and FSR run everywhere, XeSS and DLSS need their GPU.",
         {"NVIDIA Image Scaling (NIS)", "AMD FSR", "Intel XeSS", "NVIDIA DLSS"},

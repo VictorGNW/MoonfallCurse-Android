@@ -51,7 +51,7 @@ class NriPicaPipelineBridge final {
     bool InitializePipelineCache(std::span<const uint8_t> data = {});
     bool PreparePipeline(const NriPicaGraphicsPipelineDesc& desc,
                          NriPicaPipelineFactory factory = NriPicaPipelineFactory::Default);
-    [[nodiscard]] std::vector<uint8_t> GetPipelineCacheData() const;
+    [[nodiscard]] std::vector<uint8_t> GetPipelineCacheData(uint64_t maximumBytes = 0) const;
     [[nodiscard]] Renderer3ds::NriPicaPipelineStatistics PipelineStatistics() const;
     bool CreateOwnedPipeline(
         NriPicaPipelineId pipelineId,

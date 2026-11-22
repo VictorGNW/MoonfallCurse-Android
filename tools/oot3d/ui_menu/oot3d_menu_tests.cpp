@@ -118,6 +118,40 @@ void Tap(Model& model, bool Input::*field) {
     model.Update(Input{}, 0.016);
 }
 
+void TestPresetChoice() {
+    Store store;
+    store.Choice = 2;
+    auto document = BuildDocument(store);
+    auto& preset = document.Tabs.front().Rows[2];
+    preset.Choices = {"Authentic", "Enhanced for Mobile"};
+    preset.ChoiceFallback = "Custom";
+    preset.ReapplyChoice = true;
+    preset.ChoiceAvailable = {};
+    int writes = 0;
+    preset.Write = [&](int value) {
+        ++writes;
+        store.Choice = value;
+        return WriteResult{};
+    };
+    Model model(std::move(document));
+    model.Open();
+    model.Update(Input{}, 0.016);
+    Tap(model, &Input::Down);
+    Expect(model.FocusedRow()->ValueText() == "Custom", "a saved preset outside the list shows Custom");
+    Tap(model, &Input::Confirm);
+    Expect(model.ChoiceIndex() == 0, "confirm focuses the first selectable preset from Custom");
+    Tap(model, &Input::Back);
+    Tap(model, &Input::Left);
+    Expect(store.Choice == 1, "left selects the last offered preset from Custom");
+    store.Choice = 2;
+    model.Refresh();
+    Tap(model, &Input::Right);
+    Expect(store.Choice == 0, "right selects the first offered preset from Custom");
+    Tap(model, &Input::Confirm);
+    Tap(model, &Input::Confirm);
+    Expect(writes == 3, "confirming the current preset applies its values again");
+}
+
 void TestModelNavigation() {
     Store store;
     Model model(BuildDocument(store));
@@ -1372,6 +1406,7 @@ int main(int argc, char** argv) {
         TestAudioRows();
         TestTextureRows();
         TestModelNavigation();
+        TestPresetChoice();
         TestModal();
         TestPointer();
         TestFonts();

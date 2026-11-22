@@ -15,7 +15,7 @@ The developer APK above (`dev` flavor, `org.triaevum.android`) stays a developer
 `eot` and `mc` flavors, one title each, built only by the publisher with
 `tools/android/android_release.py --title <oot3d|mm3d>` (it prints the exact commands; `--run` executes them).
 Signing comes only from the `TRIAEVUM_ANDROID_*` environment variables, and the Forge package is signed with the
-release key. The staged libraries must pass `tools/android/android_elf_checks.py` (16 KiB pages, one NDK, libc++
+release key. Moonfall Curse updates use the same distribution certificate as the first public APK. The staged libraries must pass `tools/android/android_elf_checks.py` (16 KiB pages, one NDK, libc++
 closure), and every APK must pass `tools/triaevum_release/android_release_policy.py audit`. Neither APK includes game
 assets. Flow, signing, audit and qualification: [docs/TRIAEVUM_ANDROID_RELEASE.md](../../docs/TRIAEVUM_ANDROID_RELEASE.md).
 
@@ -23,13 +23,16 @@ assets. Flow, signing, audit and qualification: [docs/TRIAEVUM_ANDROID_RELEASE.m
 
 - Retain the existing Vulkan/NRI renderer, native PICA rendering, gameplay and
   shared service interfaces. No Android-specific renderer or new decompilation.
-- Android renders the configured effects like the desktop (2026-10-23). The
-  runtime initializes a missing configuration with the product defaults
-  (`--initialize-config product`): the Enhanced for Mobile preset (Enhanced at
-  30 fps without interpolation, 80% internal scale, 80% of the grass budget, no
-  water reflections), with the picture filling the display (Free aspect, a
-  host-owned default outside the preset) instead of a 16:9 pillarbox. The full
-  Enhanced stays selectable in F1 and the in-game menu.
+- The shared application manifest declares the game category for every APK
+  variant. Android and the device manufacturer control Game Mode availability.
+- New installations use Enhanced for Mobile with native render scale (100%),
+  2x visual interpolation, SMAA 1x, 4x anisotropic filtering, 1.10x scene FOV
+  and extended draw distance. The preset uses 80% of the desktop grass budget
+  and disables screen-space water reflections. SMAA requires renderer support.
+  Authentic and Enhanced for Mobile are the two Android presets in F1 and the
+  in-game menu. Android turns off active upscaling in older configurations.
+  Reapply the preset to load its new defaults. Free aspect remains Android's
+  display default.
   `NativePresentationPolicy` is no longer forced on Android; F2 toggles the
   native mask on every platform.
 - Platform lifecycle, surfaces, input devices, storage and audio-device binding

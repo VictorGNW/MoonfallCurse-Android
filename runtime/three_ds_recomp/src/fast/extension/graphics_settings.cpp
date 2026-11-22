@@ -84,8 +84,6 @@ bool IsDirectionalShadowResolution(uint32_t resolution) {
     return resolution == 2048U || resolution == 4096U;
 }
 
-constexpr float kEnhancedForMobileRenderScale = 0.8F;
-
 } // namespace
 
 void ResetToonLightBandProfile(ToonStyleSettings& settings) noexcept {
@@ -201,13 +199,15 @@ GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
         // A tuned play configuration (EnhancedPresetDocument).
         value = EnhancedPresetSettings();
     } else if (preset == GraphicsPreset::EnhancedForMobile) {
-        // Enhanced's look at a phone's cost: 30 fps without interpolation, 80%
-        // internal scale and 80% of the desktop grass budget. A phone at 60 fps
-        // runs hot and loses its GPU clocks within a minute.
         value = EnhancedPresetSettings();
         value.Preset = preset;
-        value.FrameRate = FrameRateMode::Original30;
-        value.InternalResolutionScale = kEnhancedForMobileRenderScale;
+        value.FrameRate = FrameRateMode::Interpolated2x;
+        value.InternalResolutionScale = 1.0F;
+        value.AntiAliasing = AntiAliasingMode::Smaa1x;
+        value.MsaaSamples = 1;
+        value.Anisotropy = 4;
+        value.FovMultiplier = 1.10F;
+        value.ExtendedDrawDistance = true;
         value.Grass.MaxInstancesPerRoom = value.Grass.MaxInstancesPerRoom / 5U * 4U;
         // Water keeps its waves, Fresnel sky (fog colour) reflection, sun
         // specular and foam in the scene shader; the screen-space water trace
@@ -258,8 +258,7 @@ GraphicsSettings ProductDefaultGraphicsSettings() {
 
 std::span<const GraphicsPreset> BuiltInGraphicsPresets(GraphicsPresetHost host) noexcept {
     static constexpr std::array desktop{GraphicsPreset::Authentic, GraphicsPreset::Enhanced, GraphicsPreset::Toon};
-    static constexpr std::array mobile{GraphicsPreset::Authentic, GraphicsPreset::Enhanced,
-                                       GraphicsPreset::EnhancedForMobile, GraphicsPreset::Toon};
+    static constexpr std::array mobile{GraphicsPreset::Authentic, GraphicsPreset::EnhancedForMobile};
     if (host == GraphicsPresetHost::Mobile) return mobile;
     return desktop;
 }
@@ -282,16 +281,18 @@ int GraphicsPresetChoiceIndex(GraphicsPresetHost host, GraphicsPreset preset) no
 
 void ResetDisplaySettings(GraphicsSettings& settings) {
     // The least demanding presentation: a window at the product's default
-    // size, native render scale, no anti-aliasing or upscaler. Enhanced for
-    // Mobile keeps its own scale: it is the preset's, and a phone's safe one.
+    // size, native render scale, no anti-aliasing or upscaler.
     const GraphicsSettings safe{};
     settings.Window = safe.Window;
     settings.OutputWidth = kProductDefaultWindowExtent.Width;
     settings.OutputHeight = kProductDefaultWindowExtent.Height;
     settings.OutputProvenance = WindowExtentProvenance::Default;
-    settings.InternalResolutionScale = settings.Preset == GraphicsPreset::EnhancedForMobile
-                                           ? kEnhancedForMobileRenderScale
-                                           : safe.InternalResolutionScale;
+    if (settings.Preset == GraphicsPreset::EnhancedForMobile &&
+        (settings.InternalResolutionScale != safe.InternalResolutionScale ||
+         settings.AntiAliasing != safe.AntiAliasing)) {
+        settings.Preset = GraphicsPreset::Custom;
+    }
+    settings.InternalResolutionScale = safe.InternalResolutionScale;
     settings.AntiAliasing = safe.AntiAliasing;
     settings.MsaaSamples = safe.MsaaSamples;
     settings.Upscaler = safe.Upscaler;
@@ -923,6 +924,10 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
                 "SMAA 1x requires the three-stage NRI compute pipeline");
     }
     if (value.AntiAliasing == AntiAliasingMode::Upscaler) {
+#if defined(__ANDROID__)
+        value.AntiAliasing = AntiAliasingMode::Off;
+        Correct(result.Issues, "Graphics.AA.Mode", "upscaling is unavailable on Android");
+#else
         const bool temporal = IsTemporalUpscaler(value.Upscaler);
         const GraphicsCapability providerCapability = [&] {
             switch (value.Upscaler) {
@@ -950,6 +955,7 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
                         ? "the selected temporal NRI upscaler or its guides are unavailable"
                         : "NRI NIS is unavailable in this build or on this GPU");
         }
+#endif
     }
     if (!IsMsaaCount(value.MsaaSamples)) {
         value.MsaaSamples = 1;

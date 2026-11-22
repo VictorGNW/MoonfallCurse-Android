@@ -12,6 +12,7 @@ std::string Row::ValueText() const {
     case RowKind::Toggle:
         return Value != 0 ? "On" : "Off";
     case RowKind::Choice:
+        if (Value == -1 && !ChoiceFallback.empty()) return ChoiceFallback;
         if (Choices.empty()) return {};
         return Choices[static_cast<std::size_t>(std::clamp<int>(Value, 0, static_cast<int>(Choices.size()) - 1))];
     case RowKind::Number:
@@ -216,7 +217,12 @@ void Model::RefreshRow(Row& row) {
     row.Enabled = !row.Available || row.Available();
     if (row.Read) row.Value = row.Read();
     if (row.Kind == RowKind::Choice && !row.Choices.empty()) {
-        row.Value = std::clamp<int>(row.Value, 0, static_cast<int>(row.Choices.size()) - 1);
+        const int count = static_cast<int>(row.Choices.size());
+        if (!row.ChoiceFallback.empty() && (row.Value < 0 || row.Value >= count)) {
+            row.Value = -1;
+        } else {
+            row.Value = std::clamp(row.Value, 0, count - 1);
+        }
     } else if (row.Kind == RowKind::Number) {
         row.Value = std::clamp(row.Value, row.Minimum, row.Maximum);
     } else if (row.Kind == RowKind::Toggle) {
@@ -266,11 +272,14 @@ void Model::Adjust(int direction) {
         const int count = static_cast<int>(row->Choices.size());
         if (count == 0) return;
         int value = row->Value;
+        if (value == -1 && direction < 0) value = 0;
         for (int step = 0; step < count; ++step) {
             value = (value + direction + count) % count;
-            if (!row->ChoiceAvailable || row->ChoiceAvailable(value)) break;
+            if (!row->ChoiceAvailable || row->ChoiceAvailable(value)) {
+                if (value != row->Value) Apply(*row, value);
+                break;
+            }
         }
-        if (value != row->Value) Apply(*row, value);
         break;
     }
     case RowKind::Number: {
@@ -294,7 +303,7 @@ void Model::Confirm() {
     case RowKind::Choice:
         if (!row->Choices.empty()) {
             mInChoices = true;
-            mChoice = static_cast<std::size_t>(row->Value);
+            mChoice = static_cast<std::size_t>(std::max(0, row->Value));
         }
         break;
     case RowKind::Number:
@@ -324,13 +333,14 @@ void Model::Back() {
 // A value picked from the list by its index: applied when the owner takes it,
 // refused on the status line otherwise. The list closes on success.
 void Model::ChooseValue(Row& row, int value) {
-    const bool available = !row.ChoiceAvailable || row.ChoiceAvailable(value);
+    const bool available = value >= 0 && value < static_cast<int>(row.Choices.size()) &&
+                           (!row.ChoiceAvailable || row.ChoiceAvailable(value));
     if (!available) {
         SetStatus("Not available with the current renderer", true);
         return;
     }
     mInChoices = false;
-    if (value != row.Value) Apply(row, value);
+    if (value != row.Value || row.ReapplyChoice) Apply(row, value);
 }
 
 void Model::ResolveModal(bool confirm) {

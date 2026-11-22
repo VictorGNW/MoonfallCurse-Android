@@ -207,18 +207,19 @@ void NativeRealtimeRefreshPacer::ObservePresentation(
     ++mStats.PresentationIntervals;
     mStats.TotalIntervalSeconds += interval;
 #if defined(__ANDROID__)
-    // At 30 Hz the normal 33 ms interval crosses the desktop diagnostic
-    // threshold. Allow cadence jitter and limit synchronous stderr writes.
-    if (mEnabled && mTargetRateHz == 30U) {
+    // Measure actual host presentation call intervals at each cap.
+    // Allow cadence jitter and limit synchronous stderr writes.
+    if (mEnabled && mTargetRateHz != 0U) {
+        const double targetMs = 1000.0 / mTargetRateHz;
         const double intervalMs = interval * 1000.0;
         ++mTimingSamples;
         mTimingTotal += intervalMs;
         mTimingMax = std::max(mTimingMax, intervalMs);
-        if (std::abs(intervalMs - 1000.0 / 30.0) <= 2.0) ++mTimingNearTarget;
+        if (std::abs(intervalMs - targetMs) <= 2.0) ++mTimingNearTarget;
         if (mTimingSamples == 120U) {
             std::fprintf(stderr,
-                "TRIAEVUM_PACING target_ms=33.33 submit_mean_ms=%.2f submit_max_ms=%.2f within_2ms=%u/%u\n",
-                mTimingTotal / mTimingSamples, mTimingMax, mTimingNearTarget, mTimingSamples);
+                "TRIAEVUM_PACING target_ms=%.2f submit_mean_ms=%.2f submit_max_ms=%.2f within_2ms=%u/%u\n",
+                targetMs, mTimingTotal / mTimingSamples, mTimingMax, mTimingNearTarget, mTimingSamples);
             mTimingSamples = mTimingNearTarget = 0;
             mTimingTotal = mTimingMax = 0;
         }
