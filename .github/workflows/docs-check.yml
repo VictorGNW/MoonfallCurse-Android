@@ -18,10 +18,10 @@ jobs:
           import pathlib,re,sys,urllib.parse
           bad=[]
           for f in [pathlib.Path('AGENTS.md'),*pathlib.Path('docs').rglob('*.md')]:
-              if not f.exists(): continue
+              if not f.exists() or f.name.endswith('_TEMPLATE.md'): continue
               for target in re.findall(r'(?<!\!)\[[^\]]+\]\(([^)]+)\)',f.read_text('utf-8')):
                   path=urllib.parse.unquote(target.split('#')[0].split('?')[0])
-                  if not path or '://' in path or path.startswith(('mailto:','#')): continue
+                  if not path or '://' in path or path.startswith(('mailto:','#')) or ('<' in path and '>' in path): continue
                   if not (f.parent/path).exists(): bad.append(f'{f}: {target}')
           if bad:
               print('Broken relative links:\n'+'\n'.join(bad))
