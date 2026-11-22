@@ -27,3 +27,7 @@ When reporting an issue, include the APK or commit version, phone model, Android
 Thanks to the [TriAevum](https://github.com/coccofresco/TriAevum) contributors, the [MM3D-PC](https://github.com/Volpe34/MM3D-PC) project that provided the basis for the earlier MM3D-Mobile prototype, and the [Azahar](https://github.com/azahar-emu/azahar) contributors whose touch overlay is used by the Android app. See the [third-party notices](THIRD_PARTY_NOTICES.md) and [license scope](LICENSE_SCOPE.md) for component credits and terms.
 
 Majora’s Mask 3D and its game assets belong to their respective rights holders. This is an unofficial fan project. Use your own dump and keep ROM images, extracted game data, keys, and locally generated title files private.
+
+## Technical documentation
+
+See [docs/INDEX.md](docs/INDEX.md) for Android/Vulkan architecture, GPU compatibility, SGSR EdgeDir planning, performance investigations, and upstream tracking. The [AGENTS.md](AGENTS.md) file contains development rules for AI agents.
