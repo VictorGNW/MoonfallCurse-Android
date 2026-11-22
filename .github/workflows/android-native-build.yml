@@ -1,0 +1,90 @@
+name: Build Android native components (no APK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Code to compile (latest released Android source by default)"
+        type: string
+        required: true
+        default: "v0.5.0-alpha.2"
+  push:
+    branches: [MM3D-Android]
+    paths:
+      - ".github/workflows/android-native-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moonfall-native-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    name: Android ARM64 runtime and Vulkan renderer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      TRIAEVUM_BUILD_TITLE: "0"
+    steps:
+      - name: Checkout requested source (no game content)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || 'v0.5.0-alpha.2' }}
+          persist-credentials: false
+          submodules: false
+
+      - name: Prepare CMake and Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/ci-venv"
+          "$RUNNER_TEMP/ci-venv/bin/pip" install -q "cmake==3.30.9" ninja
+          echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install Android NDK r29
+        uses: android-actions/setup-android@v4
+
+      - name: Resolve NDK toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;29.0.14206865" "platforms;android-35"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "TRIAEVUM_BUILD_DIR=$RUNNER_TEMP/mm3d-native" >> "$GITHUB_ENV"
+          echo "TRIAEVUM_ANDROID_RENDERER_BUILD_DIR=$RUNNER_TEMP/mm3d-renderer" >> "$GITHUB_ENV"
+
+      - name: Compile native host and module probes
+        shell: bash
+        run: bash scripts/build-android-native.sh
+
+      - name: Compile real PICA/Vulkan/NRI renderer link probe
+        shell: bash
+        run: bash scripts/build-android-renderer.sh
+
+      - name: Preserve native compilation evidence (not an APK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/android-native-evidence"
+          {
+            echo "source_commit=$(git rev-parse HEAD)"
+            echo "source_ref=${{ inputs.source_ref || 'v0.5.0-alpha.2' }}"
+            echo "architecture=arm64-v8a"
+            echo "kind=native compilation only; not an APK or full game"
+          } > "$RUNNER_TEMP/android-native-evidence/BUILD_INFO.txt"
+          find "$TRIAEVUM_BUILD_DIR" "$TRIAEVUM_ANDROID_RENDERER_BUILD_DIR" \
+            -maxdepth 6 -type f -name "*.so" -print | sort \
+            > "$RUNNER_TEMP/android-native-evidence/ELF_INVENTORY.txt"
+          test -s "$RUNNER_TEMP/android-native-evidence/ELF_INVENTORY.txt"
+          echo "Native ARM64 library compilation completed. No game APK produced." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics into this Actions run only
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moonfall-ARM64-native-build-evidence
+          path: ${{ runner.temp }}/android-native-evidence/
+          retention-days: 7
+          if-no-files-found: error
