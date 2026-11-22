@@ -58,7 +58,7 @@ jobs:
           fi
           if (( ${#missing[@]} )); then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Full APK build skipped; missing publisher inputs/signing configuration."
+            echo "::notice::Full APK build skipped; missing settings: ${missing[*]}."
             {
               echo "## Build not started"
               echo "Required settings unavailable: \`${missing[*]}\`."
