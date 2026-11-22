@@ -26,3 +26,4 @@ Os guias são hipóteses e propostas até validação em código/hardware. Não 
 - [Modelo de relatório](templates/CHANGE_REPORT.md) e [histórico documental](CHANGELOG_DOCS.md).
 
 Todos os demais guias técnicos encontram-se organizados em optimization/, renderer/, reliability/ e upstream/. As propostas não representam recursos implementados.
+- [Compilação APK em GitHub Actions (artifact interno)](ANDROID_ACTIONS_BUILD.md).

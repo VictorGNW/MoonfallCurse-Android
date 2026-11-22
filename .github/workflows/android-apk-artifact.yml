@@ -1,0 +1,208 @@
+name: Moonfall Curse Android APK (Actions artifact only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Source to compile (latest published source by default)"
+        required: true
+        default: "v0.5.0-alpha.2"
+        type: string
+      unsigned_candidate:
+        description: "Developer-only unsigned candidate (cannot update signed installation)"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [MM3D-Android]
+    paths:
+      - ".github/workflows/android-apk-artifact.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mm3d-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prerequisites:
+    name: Check publisher inputs and signing availability
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: Check required private inputs (no expensive build)
+        id: check
+        shell: bash
+        env:
+          INPUT_URL: ${{ secrets.MM3D_PUBLISHER_BUNDLE_URL }}
+          UNSIGNED: ${{ inputs.unsigned_candidate && 'true' || 'false' }}
+          APK_KEYSTORE_B64: ${{ secrets.TRIAEVUM_ANDROID_KEYSTORE_B64 }}
+          APK_STORE_PASS: ${{ secrets.TRIAEVUM_ANDROID_KEYSTORE_PASS }}
+          APK_ALIAS: ${{ secrets.TRIAEVUM_ANDROID_KEY_ALIAS }}
+          APK_KEY_PASS: ${{ secrets.TRIAEVUM_ANDROID_KEY_PASS }}
+          APK_SIGNER_SHA256: ${{ vars.TRIAEVUM_ANDROID_SIGNER_SHA256 }}
+          FORGE_KEY_B64: ${{ secrets.TRIAEVUM_RELEASE_SIGNING_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [[ -z "$INPUT_URL" ]]; then missing+=(MM3D_PUBLISHER_BUNDLE_URL); fi
+          if [[ "$UNSIGNED" != "true" ]]; then
+            [[ -n "$APK_KEYSTORE_B64" ]] || missing+=(TRIAEVUM_ANDROID_KEYSTORE_B64)
+            [[ -n "$APK_STORE_PASS" ]] || missing+=(TRIAEVUM_ANDROID_KEYSTORE_PASS)
+            [[ -n "$APK_ALIAS" ]] || missing+=(TRIAEVUM_ANDROID_KEY_ALIAS)
+            [[ -n "$APK_KEY_PASS" ]] || missing+=(TRIAEVUM_ANDROID_KEY_PASS)
+            [[ "$APK_SIGNER_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || missing+=(TRIAEVUM_ANDROID_SIGNER_SHA256)
+            [[ -n "$FORGE_KEY_B64" ]] || missing+=(TRIAEVUM_RELEASE_SIGNING_KEY_B64)
+          fi
+          if (( ${#missing[@]} )); then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Full APK build skipped; missing publisher inputs/signing configuration."
+            {
+              echo "## Build not started"
+              echo "Required settings unavailable: \`${missing[*]}\`."
+              echo "No source compilation and no APK artifact were produced."
+              echo "See docs/ANDROID_ACTIONS_BUILD.md for setup."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Publisher inputs and required signing settings are configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  build-apk:
+    name: Compile full arm64 Moonfall Curse APK
+    needs: prerequisites
+    if: needs.prerequisites.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    defaults:
+      run:
+        shell: bash
+    env:
+      INPUT_URL: ${{ secrets.MM3D_PUBLISHER_BUNDLE_URL }}
+      INPUT_TOKEN: ${{ secrets.MM3D_PUBLISHER_BUNDLE_TOKEN }}
+      INPUT_SHA256: ${{ vars.MM3D_PUBLISHER_BUNDLE_SHA256 }}
+      APK_KEYSTORE_B64: ${{ secrets.TRIAEVUM_ANDROID_KEYSTORE_B64 }}
+      TRIAEVUM_ANDROID_KEYSTORE_PASS: ${{ secrets.TRIAEVUM_ANDROID_KEYSTORE_PASS }}
+      TRIAEVUM_ANDROID_KEY_ALIAS: ${{ secrets.TRIAEVUM_ANDROID_KEY_ALIAS }}
+      TRIAEVUM_ANDROID_KEY_PASS: ${{ secrets.TRIAEVUM_ANDROID_KEY_PASS }}
+      TRIAEVUM_ANDROID_SIGNER_SHA256: ${{ vars.TRIAEVUM_ANDROID_SIGNER_SHA256 }}
+      FORGE_KEY_B64: ${{ secrets.TRIAEVUM_RELEASE_SIGNING_KEY_B64 }}
+      UNSIGNED: ${{ inputs.unsigned_candidate && 'true' || 'false' }}
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+    steps:
+      - name: Checkout requested source (not necessarily the workflow branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || 'v0.5.0-alpha.2' }}
+          submodules: false
+          persist-credentials: false
+
+      - name: Fetch private publisher inputs and verify layout
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/mm3d-publisher-inputs.zip"
+          root="$RUNNER_TEMP/mm3d-publisher-inputs"
+          if [[ -n "$INPUT_TOKEN" ]]; then
+            curl --fail --silent --show-error --location --retry 2 -H "Authorization: Bearer $INPUT_TOKEN" -o "$archive" "$INPUT_URL"
+          else
+            curl --fail --silent --show-error --location --retry 2 -o "$archive" "$INPUT_URL"
+          fi
+          if [[ -n "$INPUT_SHA256" ]]; then
+            [[ "$INPUT_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "::error::Invalid bundle SHA-256"; exit 1; }
+            echo "$INPUT_SHA256  $archive" | sha256sum --check --status
+          fi
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          rm -f "$archive"
+          for subdir in translated-sources a32-registry desktop-reference; do
+            [[ -d "$root/$subdir" ]] || { echo "::error::Missing $subdir/ in publisher input ZIP"; exit 1; }
+            [[ -n "$(find "$root/$subdir" -type f -print -quit)" ]] || { echo "::error::Empty $subdir/"; exit 1; }
+          done
+          echo "MM3D_INPUT_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Gradle 8.13 (cached)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install NDK r29 and Android build tools
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865" "platform-tools"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Configure Rust, CMake, Ninja and Python cryptography
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-linux-android
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build python3-venv
+          python3 -m venv "$RUNNER_TEMP/build-venv"
+          "$RUNNER_TEMP/build-venv/bin/pip" install -q "cmake==3.30.9" cryptography
+          echo "$RUNNER_TEMP/build-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Reconstruct publisher signing keys in temporary files
+        run: |
+          set -euo pipefail
+          if [[ "$UNSIGNED" == "true" ]]; then
+            echo "::warning::Unsigned candidate; cannot install as an update to a signed app."
+          else
+            printf '%s' "$APK_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/moonfall-signing.jks"
+            printf '%s' "$FORGE_KEY_B64" | base64 --decode > "$RUNNER_TEMP/moonfall-forge-signing.pem"
+            chmod 600 "$RUNNER_TEMP/moonfall-signing.jks" "$RUNNER_TEMP/moonfall-forge-signing.pem"
+            echo "TRIAEVUM_ANDROID_KEYSTORE=$RUNNER_TEMP/moonfall-signing.jks" >> "$GITHUB_ENV"
+            echo "TRIAEVUM_RELEASE_SIGNING_KEY=$RUNNER_TEMP/moonfall-forge-signing.pem" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compile runtime, ARM64 title, Forge and APK
+        run: |
+          set -euo pipefail
+          argv=(python3 -I tools/android/android_release.py
+            --title mm3d
+            --ndk "$ANDROID_NDK_HOME"
+            --work "$RUNNER_TEMP/mm3d-build"
+            --translated-sources "$MM3D_INPUT_ROOT/translated-sources"
+            --a32-registry "$MM3D_INPUT_ROOT/a32-registry"
+            --reference-package "$MM3D_INPUT_ROOT/desktop-reference"
+            --source-commit "$(git rev-parse HEAD)"
+            --gradle gradle
+            --apksigner "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+            --run)
+          [[ "$UNSIGNED" == "true" ]] && argv+=(--unsigned-candidate)
+          "${argv[@]}"
+
+      - name: APK fingerprint and artifact manifest
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mm3d-artifact"
+          find ports/android/app/build/outputs/apk/mc/release -maxdepth 1 -name "*.apk" -type f -print -quit | grep -q .
+          cp ports/android/app/build/outputs/apk/mc/release/*.apk "$RUNNER_TEMP/mm3d-artifact/"
+          (cd "$RUNNER_TEMP/mm3d-artifact" && sha256sum *.apk > SHA256SUMS.txt)
+          printf 'source_commit=%s\nsource_ref=%s\nsigned=%s\n' "$(git rev-parse HEAD)" "${{ inputs.source_ref || 'v0.5.0-alpha.2' }}" "$([[ "$UNSIGNED" != "true" ]] && echo yes || echo no)" > "$RUNNER_TEMP/mm3d-artifact/BUILD_INFO.txt"
+          echo "APK build completed; artifact contains an APK, checksum and source commit." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK to Actions only (not GitHub Releases)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moonfall-Curse-Android-${{ github.run_number }}-arm64
+          path: ${{ runner.temp }}/mm3d-artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Delete transient private keys
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/moonfall-signing.jks" "$RUNNER_TEMP/moonfall-forge-signing.pem"
