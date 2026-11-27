@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -115,6 +117,16 @@ def recipe(title: str, *, ndk: Path, work: Path, translated_sources: Path, refer
     return steps
 
 
+def verify_apk(apksigner: str, apk: Path, expected_signer: str) -> None:
+    verified = subprocess.run([apksigner, "verify", "--verbose", "--print-certs", str(apk)],
+                              check=True, text=True, stdout=subprocess.PIPE)
+    digests = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$",
+                         verified.stdout, re.MULTILINE)
+    if [digest.lower() for digest in digests] != [expected_signer.lower()]:
+        raise ValueError("APK must have exactly one signer matching the permanent certificate")
+    print(verified.stdout, end="")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--title", required=True, choices=("oot3d", "mm3d"))
@@ -126,21 +138,52 @@ def main(argv=None) -> int:
     parser.add_argument("--reference-package", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--gradle", default="gradle")
+    parser.add_argument("--apksigner", default="apksigner", help="Android SDK apksigner executable")
+    parser.add_argument("--unsigned-candidate", action="store_true", help="build an unsigned release candidate")
     parser.add_argument("--run", action="store_true", help="execute the steps (default: print them)")
     args = parser.parse_args(argv)
     if args.work.resolve().is_relative_to(ROOT):
         parser.error("--work must be outside the repository")
+    environ = dict(os.environ)
+    signed = not args.unsigned_candidate and all(environ.get(name) for name in SIGNING_VARIABLES)
+    expected_signer = environ.get("TRIAEVUM_ANDROID_SIGNER_SHA256", "").lower()
+    if args.title == "mm3d" and args.run and not args.unsigned_candidate:
+        pinned = (ROOT / "ports/android/signing/mm3d-apk-cert.sha256").read_text().strip()
+        if expected_signer and expected_signer != pinned:
+            parser.error("Moonfall Curse must use the signing certificate of the published app")
+        expected_signer = pinned
+    if args.run and not args.unsigned_candidate:
+        if not signed:
+            parser.error("set all Android signing variables or pass --unsigned-candidate")
+        if args.title == "mm3d" and not environ.get("TRIAEVUM_RELEASE_SIGNING_KEY"):
+            parser.error("set the separate Forge publisher key in TRIAEVUM_RELEASE_SIGNING_KEY")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_signer):
+            parser.error("set TRIAEVUM_ANDROID_SIGNER_SHA256 to the permanent certificate SHA-256")
+        if shutil.which(args.apksigner) is None:
+            parser.error("supply --apksigner from Android SDK Build Tools")
+    if args.unsigned_candidate:
+        for name in SIGNING_VARIABLES:
+            environ.pop(name, None)
     steps = recipe(args.title, ndk=args.ndk, work=args.work, translated_sources=args.translated_sources,
                    a32_registry=args.a32_registry,
-                   reference_package=args.reference_package, source_commit=args.source_commit, gradle=args.gradle)
+                   reference_package=args.reference_package, source_commit=args.source_commit, gradle=args.gradle,
+                   environ=environ)
     for step, command, extra in steps:
         prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in extra.items())
         print(f"# {step}\n{prefix + ' ' if prefix else ''}{shlex.join(command)}")
         if args.run:
-            completed = subprocess.run(command, cwd=ROOT, env={**os.environ, **extra})
+            completed = subprocess.run(command, cwd=ROOT, env={**environ, **extra})
             if completed.returncode:
                 print(f"step {step!r} failed with exit code {completed.returncode}", file=sys.stderr)
                 return completed.returncode
+    if args.run and signed:
+        flavor = android_facts(args.title)["flavor"]
+        apk = ROOT / f"ports/android/app/build/outputs/apk/{flavor}/release/app-{flavor}-release.apk"
+        try:
+            verify_apk(args.apksigner, apk, expected_signer)
+        except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+            print(f"APK signature verification failed: {exc}", file=sys.stderr)
+            return 1
     print("# then: aapt2 dump badging, apksigner verify --print-certs, android_release_policy.py audit "
           f"<apk> --title {args.title} (docs/TRIAEVUM_ANDROID_RELEASE.md)")
     return 0

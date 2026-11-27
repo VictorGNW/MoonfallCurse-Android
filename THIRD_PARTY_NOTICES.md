@@ -563,3 +563,10 @@ See [the SGSR license](LICENSES/Snapdragon-GSR-BSD-3-Clause.txt).
   MIT-licensed ASTC compute encoder. See the
   [source and regeneration notes](runtime/three_ds_recomp/src/fast/extension/third_party/bcn_layer/README.md)
   and the [Android notice](ports/android/app/src/main/assets/notices/BcnLayer-MIT.txt).
+
+## Bundled Mesa Turnip for Android
+
+The Android publisher stage packages [Mesa Turnip 26.3.0](https://archive.mesa3d.org/mesa-26.3.0.tar.xz)
+from the Android KGSL build by [nihui](https://github.com/nihui/mesa-turnip-android-driver/tree/5040c0fa26a19803bbff5cb917bcac6a9740535c).
+The matching source, build patches and Mesa license information are recorded
+in [Android notices](ports/android/app/src/main/assets/notices/Turnip-26.3.0-SOURCE.txt).

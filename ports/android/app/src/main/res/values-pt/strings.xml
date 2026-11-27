@@ -91,6 +91,9 @@
     <string name="forge_gpu_driver">Driver da GPU</string>
     <string name="forge_driver_system">Driver do sistema selecionado. Importe um ZIP confiável do Mesa Turnip para uma GPU Adreno compatível.</string>
     <string name="forge_turnip_imported">Turnip importado. O jogo vai testar o driver na próxima abertura. Se ele falhar antes do primeiro frame, a próxima abertura usa o driver do sistema. Importe ZIPs apenas de fontes de confiança.</string>
+    <string name="forge_turnip_use_bundled">Automático · Turnip 26.3.0 integrado (Adreno 600)</string>
+    <string name="forge_turnip_use_imported">Usar Turnip importado</string>
+    <string name="forge_driver_next_start">O driver selecionado será usado na próxima abertura do jogo.</string>
     <string name="forge_turnip_import">Importar ZIP do Turnip</string>
     <string name="forge_driver_use_system">Usar driver do sistema</string>
     <string name="forge_turnip_failed">Não foi possível alterar o driver da GPU.</string>

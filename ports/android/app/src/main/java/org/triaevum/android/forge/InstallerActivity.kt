@@ -478,23 +478,33 @@ class InstallerActivity : Activity() {
 
     private fun chooseGpuDriver() {
         if (importingTurnip) return
-        val dialog = AlertDialog.Builder(this)
+        val modes = buildList {
+            add(TurnipDriver.Mode.SYSTEM to R.string.forge_driver_use_system)
+            if (TurnipDriver.bundledAvailable(this@InstallerActivity))
+                add(TurnipDriver.Mode.BUNDLED to R.string.forge_turnip_use_bundled)
+            if (TurnipDriver.imported(this@InstallerActivity))
+                add(TurnipDriver.Mode.IMPORTED to R.string.forge_turnip_use_imported)
+        }
+        val selectedMode = TurnipDriver.mode(this)
+        AlertDialog.Builder(this)
             .setTitle(R.string.forge_gpu_driver)
-            .setMessage(if (TurnipDriver.imported(this)) R.string.forge_turnip_imported
-                        else R.string.forge_driver_system)
+            .setSingleChoiceItems(modes.map { getString(it.second) }.toTypedArray(),
+                modes.indexOfFirst { it.first == selectedMode }.coerceAtLeast(0)) { dialog, index ->
+                dialog.dismiss()
+                try {
+                    TurnipDriver.setMode(this, modes[index].first)
+                    showGpuDriverResult(R.string.forge_driver_next_start)
+                } catch (_: java.io.IOException) {
+                    showGpuDriverResult(R.string.forge_turnip_failed)
+                }
+            }
             .setPositiveButton(R.string.forge_turnip_import) { _, _ ->
                 val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                     .setType("application/zip")
                 startActivityForResult(pick, PICK_TURNIP)
             }
             .setNegativeButton(android.R.string.cancel, null)
-        if (TurnipDriver.imported(this)) {
-            dialog.setNeutralButton(R.string.forge_driver_use_system) { _, _ ->
-                if (TurnipDriver.useSystem(this)) showGpuDriverResult(R.string.forge_driver_system)
-                else showGpuDriverResult(R.string.forge_turnip_failed)
-            }
-        }
-        dialog.show()
+            .show()
     }
 
     private fun showGpuDriverResult(message: Int) {

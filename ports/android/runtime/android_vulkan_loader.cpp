@@ -11,6 +11,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -33,9 +34,23 @@ Function VulkanEntry(const char* name) {
 
 constexpr uint32_t kQualcommVendorId = 0x5143;
 
-bool SystemHasAdreno() {
+int AdrenoFamily(const VkPhysicalDeviceProperties& gpu) {
+    if (gpu.vendorID != kQualcommVendorId) return 0;
+    std::string_view name(gpu.deviceName);
+    if (name.substr(0, 6) != "Adreno") return 1;
+    name.remove_prefix(6);
+    while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+    if (name.substr(0, 4) == "(TM)") name.remove_prefix(4);
+    while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+    const auto digit = [](char c) { return c >= '0' && c <= '9'; };
+    if (name.size() < 3 || !digit(name[0]) || !digit(name[1]) || !digit(name[2]) ||
+        (name.size() > 3 && digit(name[3]))) return 1;
+    return name[0] - '0';
+}
+
+int ProbeSystemAdrenoFamily() {
     void* loader = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
-    if (loader == nullptr) return false;
+    if (loader == nullptr) return 0;
     const auto create = reinterpret_cast<PFN_vkCreateInstance>(dlsym(loader, "vkCreateInstance"));
     const auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(dlsym(loader, "vkDestroyInstance"));
     const auto enumerate = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(
@@ -45,7 +60,7 @@ bool SystemHasAdreno() {
 
     VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     VkInstance instance{};
-    bool adreno = false;
+    int family = 0;
     if (create && destroy && enumerate && properties &&
         create(&info, nullptr, &instance) == VK_SUCCESS) {
         VkPhysicalDevice devices[16]{};
@@ -55,13 +70,22 @@ bool SystemHasAdreno() {
             for (uint32_t i = 0; i < count && i < 16; ++i) {
                 VkPhysicalDeviceProperties gpu{};
                 properties(devices[i], &gpu);
-                adreno |= gpu.vendorID == kQualcommVendorId;
+                const int candidate = AdrenoFamily(gpu);
+                if (candidate != 0) {
+                    family = candidate;
+                    break;
+                }
             }
         }
         destroy(instance, nullptr);
     }
     dlclose(loader);
-    return adreno;
+    return family;
+}
+
+int SystemAdrenoFamily() {
+    static const int family = ProbeSystemAdrenoFamily();
+    return family;
 }
 
 bool SupportsTurnip(PFN_vkGetInstanceProcAddr getProc) {
@@ -149,14 +173,14 @@ extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(
     return __wrap_vkGetInstanceProcAddr(instance, name);
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_org_triaevum_android_TurnipDriver_systemHasAdreno(JNIEnv*, jclass) {
-    return SystemHasAdreno() ? JNI_TRUE : JNI_FALSE;
+extern "C" JNIEXPORT jint JNICALL
+Java_org_triaevum_android_TurnipDriver_systemAdrenoFamily(JNIEnv*, jclass) {
+    return SystemAdrenoFamily();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_triaevum_android_TurnipDriver_selectNative(
-    JNIEnv* env, jclass, jstring nativeDir, jstring driverDir) {
+    JNIEnv* env, jclass, jstring nativeDir, jstring driverDir, jboolean bundled) {
     const std::string hooks = Directory(env, nativeDir);
     if (hooks.empty())
         return JNI_FALSE;
@@ -167,9 +191,10 @@ Java_org_triaevum_android_TurnipDriver_selectNative(
     std::lock_guard lock(loaderMutex);
     if (loaderHandle)
         return turnipSelected ? JNI_TRUE : JNI_FALSE;
-    if (!SystemHasAdreno()) return JNI_FALSE;
+    const int family = SystemAdrenoFamily();
+    if (family == 0 || (bundled && family != 6)) return JNI_FALSE;
     void* handle = adrenotools_open_libvulkan(RTLD_NOW | RTLD_LOCAL, ADRENOTOOLS_DRIVER_CUSTOM,
-        nullptr, hooks.c_str(), driver.c_str(), "libturnip.so", nullptr, nullptr);
+        nullptr, hooks.c_str(), driver.c_str(), bundled ? "libturnip_bundled.so" : "libturnip.so", nullptr, nullptr);
     if (!handle)
         return JNI_FALSE;
     auto getProc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(handle, "vkGetInstanceProcAddr"));

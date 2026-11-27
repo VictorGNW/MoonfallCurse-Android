@@ -1,0 +1,11 @@
+Mesa Turnip 26.3.0 Android KGSL driver.
+
+Complete Mesa release source and its per-file copyright and license notices
+https://archive.mesa3d.org/mesa-26.3.0.tar.xz
+
+Android build configuration and patches at commit
+5040c0fa26a19803bbff5cb917bcac6a9740535c
+https://github.com/nihui/mesa-turnip-android-driver/tree/5040c0fa26a19803bbff5cb917bcac6a9740535c
+
+Prebuilt driver input
+https://github.com/nihui/mesa-turnip-android-driver/releases/tag/26.3.0

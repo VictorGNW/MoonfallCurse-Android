@@ -63,8 +63,18 @@ or any work folder. `-PtriaevumUnsignedReleaseCandidate=true` builds an unsigned
 (`*-release-unsigned.apk`). The audit refuses that candidate unless it is told it is auditing one
 (`--allow-unsigned`). The release notes publish the signing certificate's SHA-256.
 
-Moonfall Curse updates use the same Android signing certificate as the first
-public APK. Verify its SHA-256 before publishing each build.
+Moonfall Curse release builds verify the keystore certificate against
+`ports/android/signing/mm3d-apk-cert.sha256` before packaging, and the publisher
+recipe verifies the packaged APK with `apksigner`. The pin is from the public
+0.5.0-alpha.2 APK and the existing release certificate uses RSA-3072. A
+different key would require a deliberate signing rotation.
+
+On the machine holding the release keystore, run
+`tools/android/provision_release_signing.sh --reuse KEYSTORE BACKUP_PATH`
+with an authenticated GitHub CLI. The script validates the original key,
+checks the encrypted PKCS#12 backup and provisions the four Android signing
+secrets and certificate variable for Actions. Keep both paths outside the
+checkout. The Forge package uses its own publisher key.
 
 ```text
 81f0b468a67451e9b2368b42e3b7b4db2933fc8853371d311334628aec3468f7

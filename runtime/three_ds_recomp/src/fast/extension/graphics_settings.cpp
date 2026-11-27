@@ -912,6 +912,19 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
             return !(rect.MaxU > rect.MinU) || !(rect.MaxV > rect.MinV);
         });
     }
+#if defined(__ANDROID__)
+    if (value.AntiAliasing == AntiAliasingMode::Msaa || value.AntiAliasing == AntiAliasingMode::Taa) {
+        value.AntiAliasing = AntiAliasingMode::Fxaa;
+        Correct(result.Issues, "Graphics.AA.Mode", "legacy Android antialiasing migrated to FXAA");
+    }
+    // Existing configurations with filtering enabled now use the single
+    // Android filter setting. A device without anisotropy still selects mips.
+    if (value.Anisotropy == 2U || value.Anisotropy == 4U ||
+        value.Anisotropy == 8U || value.Anisotropy == 16U || value.TextureMipLimit != 0U) {
+        value.Anisotropy = capabilities.Has(GraphicsCapability::AnisotropicFiltering) ? 8U : 1U;
+        value.TextureMipLimit = 4U;
+    }
+#endif
     if (value.AntiAliasing == AntiAliasingMode::Taa &&
         (!capabilities.Has(GraphicsCapability::MotionVectors) ||
          !capabilities.Has(GraphicsCapability::TemporalHistory) ||

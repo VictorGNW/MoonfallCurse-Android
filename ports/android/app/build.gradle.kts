@@ -1,3 +1,6 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -136,6 +139,29 @@ gradle.taskGraph.whenReady {
         throw GradleException("Release signing needs ${missing.joinToString()} in the environment " +
             "(or -PtriaevumUnsignedReleaseCandidate=true for an unsigned candidate).")
     }
+    val moonfallRelease = allTasks.any { it.project == project && it.name.contains("McRelease") }
+    if (moonfallRelease && !unsignedCandidate) {
+        val pinned = rootProject.file("signing/mm3d-apk-cert.sha256").readText().trim()
+        val expected = System.getenv("TRIAEVUM_ANDROID_SIGNER_SHA256")?.lowercase()
+        if (expected != null && expected != pinned) {
+            throw GradleException("Moonfall Curse must be signed with the certificate of the published app.")
+        }
+        val store = KeyStore.getInstance(
+            file(signingEnvironment.getValue("TRIAEVUM_ANDROID_KEYSTORE")!!),
+            signingEnvironment.getValue("TRIAEVUM_ANDROID_KEYSTORE_PASS")!!.toCharArray()
+        )
+        val alias = signingEnvironment.getValue("TRIAEVUM_ANDROID_KEY_ALIAS")!!
+        val certificate = store.getCertificate(alias)
+        if (!store.isKeyEntry(alias) || certificate == null) {
+            throw GradleException("The Android signing alias has no private key entry.")
+        }
+        val actual = MessageDigest.getInstance("SHA-256").digest(certificate.encoded).joinToString("") {
+            "%02x".format(it.toInt() and 0xff)
+        }
+        if (actual != pinned) {
+            throw GradleException("Wrong Moonfall Curse signing certificate. Expected $pinned, found $actual.")
+        }
+    }
 }
 tasks.register("checkNativeStage") {
     doLast {
@@ -144,6 +170,12 @@ tasks.register("checkNativeStage") {
         }
         for (name in listOf("SDL2", "TriAevum", "triaevum_title_bootstrap", "triaevum_title_aot", "triaevum_forge", "c++_shared")) {
             check(file("${nativeStage.get()}/arm64-v8a/lib$name.so").isFile) { "Missing native library: $name" }
+        }
+        val nativeArm64 = file("${nativeStage.get()}/arm64-v8a")
+        if (nativeArm64.resolve("libtriaevum_vulkan.so").isFile) {
+            check(nativeArm64.resolve("libturnip_bundled.so").isFile) {
+                "Re-stage the Android libraries with stage_native_app.py to include Turnip 26.3.0."
+            }
         }
     }
 }

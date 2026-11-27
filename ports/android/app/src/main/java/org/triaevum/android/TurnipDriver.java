@@ -20,12 +20,16 @@ import java.util.Enumeration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-/** An optional, user-imported ARM64 Vulkan driver, shared by the launcher and game processes. */
+/** Vulkan driver selection shared by the launcher and game processes. */
 public final class TurnipDriver {
     private static final String DRIVER = "libturnip.so";
+    private static final String BUNDLED_DRIVER = "libturnip_bundled.so";
+    private static final String BUNDLED_TRIAL = "startup-trial-bundled-26.3.0";
+    private static final String MODE = "selection";
+    public enum Mode { BUNDLED, IMPORTED, SYSTEM }
     private static final String STARTUP_TRIAL = "startup-trial";
     private static File activeTrial;
-    private static boolean selected;
+    private static String selectedDiagnostic;
     private static final long MAX_BYTES = 128L * 1024 * 1024;
 
     private TurnipDriver() {}
@@ -42,37 +46,82 @@ public final class TurnipDriver {
         return new File(directory(context), DRIVER).isFile();
     }
 
-    public static boolean useSystem(Context context) {
-        File root = directory(context);
-        File driver = new File(root, DRIVER);
-        if (!driver.delete() && driver.exists()) return false;
-        new File(root, STARTUP_TRIAL).delete();
-        return true;
+    public static boolean bundledAvailable(Context context) {
+        return new File(context.getApplicationInfo().nativeLibraryDir, BUNDLED_DRIVER).isFile();
     }
 
-    static boolean beginTrial(File root) throws IOException {
-        // An interrupted first frame leaves the marker behind. The next
-        // game process starts using stock Vulkan even if the driver aborted.
-        return new File(root, STARTUP_TRIAL).createNewFile();
+    public static Mode mode(Context context) {
+        File root = directory(context);
+        return readMode(root, imported(context));
     }
 
-    public static synchronized boolean select(Context context) {
-        if (selected) return true;
-        if (!available(context) || !imported(context)) return false;
+    static Mode readMode(File root, boolean imported) {
+        try {
+            String configured = new String(Files.readAllBytes(new File(root, MODE).toPath()), StandardCharsets.US_ASCII);
+            return Mode.valueOf(configured);
+        } catch (IOException | IllegalArgumentException ignored) {
+            // Preserve imported drivers selected on installations without a mode file.
+            return imported ? Mode.IMPORTED : Mode.BUNDLED;
+        }
+    }
+
+    public static void setMode(Context context, Mode mode) throws IOException {
         File root = directory(context);
+        ensureDirectory(root);
+        if (mode != Mode.SYSTEM)
+            Files.deleteIfExists(new File(root, trialName(mode)).toPath());
+        writeMode(root, mode);
+    }
+
+    private static String trialName(Mode mode) {
+        return mode == Mode.BUNDLED ? BUNDLED_TRIAL : STARTUP_TRIAL;
+    }
+
+    private static void writeMode(File root, Mode mode) throws IOException {
+        File pending = File.createTempFile("selection-", ".tmp", root);
+        try {
+            Files.write(pending.toPath(), mode.name().getBytes(StandardCharsets.US_ASCII));
+            Files.move(pending.toPath(), new File(root, MODE).toPath(),
+                       StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(pending.toPath());
+        }
+    }
+
+    static boolean beginTrial(File root, Mode mode) throws IOException {
+        return new File(root, trialName(mode)).createNewFile();
+    }
+
+    public static synchronized String select(Context context) {
+        if (selectedDiagnostic != null) return selectedDiagnostic;
+        if (!available(context)) return "system_vulkan";
+        File root = directory(context);
+        Mode mode = mode(context);
+        if (mode == Mode.SYSTEM ||
+            (mode == Mode.IMPORTED && !imported(context)) ||
+            (mode == Mode.BUNDLED && !bundledAvailable(context))) return "system_vulkan";
         try {
             System.loadLibrary("triaevum_vulkan");
-            if (!beginTrial(root)) {
+            int family = systemAdrenoFamily();
+            if (family == 0 || (mode == Mode.BUNDLED && family != 6))
+                return "system_vulkan";
+            ensureDirectory(root);
+            File trial = new File(root, trialName(mode));
+            if (!beginTrial(root, mode)) {
                 Log.w("TriAevum", "Previous Turnip startup did not reach presentation; using system Vulkan");
-                return false;
+                return "turnip_unavailable_using_system";
             }
-            selected = selectNative(context.getApplicationInfo().nativeLibraryDir, root.getAbsolutePath());
-            if (selected) activeTrial = new File(root, STARTUP_TRIAL);
-            return selected;
+            String nativeDir = context.getApplicationInfo().nativeLibraryDir;
+            boolean bundled = mode == Mode.BUNDLED;
+            if (selectNative(nativeDir, bundled ? nativeDir : root.getAbsolutePath(), bundled)) {
+                activeTrial = trial;
+                selectedDiagnostic = bundled ? "turnip_bundled_26.3.0_selected" : "turnip_imported_selected";
+                return selectedDiagnostic;
+            }
         } catch (IOException | UnsatisfiedLinkError error) {
             Log.w("TriAevum", "Custom Vulkan loader unavailable", error);
-            return false;
         }
+        return "turnip_unavailable_using_system";
     }
 
     public static synchronized void firstFramePresented() {
@@ -83,24 +132,28 @@ public final class TurnipDriver {
         }
     }
 
-    private static native boolean selectNative(String nativeDir, String driverDir);
-    private static native boolean systemHasAdreno();
+    private static native boolean selectNative(String nativeDir, String driverDir, boolean bundled);
+    private static native int systemAdrenoFamily();
 
     public static void importZip(Context context, InputStream source) throws IOException, JSONException {
         if (!available(context)) throw new IOException("Custom Vulkan loader unavailable");
         try {
             System.loadLibrary("triaevum_vulkan");
-            if (!systemHasAdreno()) throw new IOException("Turnip requires a compatible Adreno GPU");
+            if (systemAdrenoFamily() == 0) throw new IOException("Turnip requires a compatible Adreno GPU");
         } catch (UnsatisfiedLinkError error) {
             throw new IOException("Custom Vulkan loader unavailable", error);
         }
         importZip(directory(context), source);
     }
 
-    static void importZip(File root, InputStream source) throws IOException, JSONException {
+    private static void ensureDirectory(File root) throws IOException {
         if (!root.isDirectory() && !root.mkdirs() && !root.isDirectory()) {
             throw new IOException("Cannot create the private driver directory");
         }
+    }
+
+    static void importZip(File root, InputStream source) throws IOException, JSONException {
+        ensureDirectory(root);
         File archive = File.createTempFile("package-", ".zip", root);
         try {
             try (OutputStream output = new FileOutputStream(archive)) {
@@ -111,6 +164,7 @@ public final class TurnipDriver {
                 install(root, zip, entry);
                 // A replacement explicitly authorizes a fresh trial.
                 Files.deleteIfExists(new File(root, STARTUP_TRIAL).toPath());
+                writeMode(root, Mode.IMPORTED);
             }
         } finally {
             Files.deleteIfExists(archive.toPath());

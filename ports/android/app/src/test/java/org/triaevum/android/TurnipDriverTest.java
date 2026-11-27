@@ -58,12 +58,22 @@ public class TurnipDriverTest {
     @Test public void interruptedStartupBlocksAnotherTrialUntilReimport() throws Exception {
         Path folder = temporary.newFolder().toPath();
         importPackage(folder, Map.of("vulkan.so", arm64Library()));
-        assertTrue(TurnipDriver.beginTrial(folder.toFile()));
-        assertFalse(TurnipDriver.beginTrial(folder.toFile()));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+        assertFalse(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
         assertThrows(IOException.class, () -> importPackage(folder, Map.of("broken.so", new byte[0])));
-        assertFalse(TurnipDriver.beginTrial(folder.toFile()));
+        assertFalse(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
         importPackage(folder, Map.of("replacement.so", arm64Library()));
-        assertTrue(TurnipDriver.beginTrial(folder.toFile()));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+    }
+
+    @Test public void defaultsToBundledAndKeepsImportedAndBundledRecoverySeparate() throws Exception {
+        Path folder = temporary.newFolder().toPath();
+        org.junit.Assert.assertEquals(TurnipDriver.Mode.BUNDLED, TurnipDriver.readMode(folder.toFile(), false));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.BUNDLED));
+        importPackage(folder, Map.of("vulkan.so", arm64Library()));
+        org.junit.Assert.assertEquals(TurnipDriver.Mode.IMPORTED, TurnipDriver.readMode(folder.toFile(), true));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+        assertFalse(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.BUNDLED));
     }
 
     private static byte[] installedDriver(Path folder) throws IOException {

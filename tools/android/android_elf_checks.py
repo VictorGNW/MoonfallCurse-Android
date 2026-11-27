@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "triaevum_release")
 from android_release_policy import elf_errors  # noqa: E402
 
 LIBCXX = "libc++_shared.so"
+BUNDLED_TURNIP_LIBRARY = "libturnip_bundled.so"
 LIBCXX_NAMESPACE = b"_ZNSt6__ndk1"
 NOTE_SECTION = b".note.android.ident"
 
@@ -93,7 +94,10 @@ def stage_errors(libraries: dict[str, bytes]) -> list[str]:
         errors.extend(elf_errors(name, data))
     # libc++_shared.so is the NDK's prebuilt (NDK r30 ships one whose note names an
     # earlier NDK); its compatibility is the symbol closure below.
-    idents = {name: android_ident(data) for name, data in libraries.items() if name != LIBCXX}
+    # The pinned bundled driver uses only Android C libraries and is built
+    # independently. Its ELF and imported symbols are still checked below.
+    idents = {name: android_ident(data) for name, data in libraries.items()
+              if name not in (LIBCXX, BUNDLED_TURNIP_LIBRARY)}
     ndks = {(ident[1], ident[2]) for ident in idents.values() if ident and ident[1]}
     if len(ndks) > 1:
         errors.append("libraries were linked by different NDKs: " + ", ".join(
@@ -108,6 +112,8 @@ def stage_errors(libraries: dict[str, bytes]) -> list[str]:
         if name == LIBCXX:
             continue
         exported, imported = dynamic_symbols(data)
+        if name == BUNDLED_TURNIP_LIBRARY and any("St6__ndk1" in symbol for symbol in imported):
+            errors.append(f"{name}: a bundled driver must not use the project's libc++ ABI")
         missing = sorted(symbol for symbol in imported
                          if symbol.startswith(LIBCXX_NAMESPACE.decode()) and symbol not in provided)
         if missing:

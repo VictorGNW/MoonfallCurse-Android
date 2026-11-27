@@ -222,6 +222,9 @@
     <string name="forge_gpu_driver">GPU driver</string>
     <string name="forge_driver_system">System driver selected. Import a trusted Mesa Turnip ZIP for a compatible Adreno GPU.</string>
     <string name="forge_turnip_imported">Turnip imported. It will be tried on the next game launch. If it fails before the first frame, the next launch uses the system driver. Import ZIPs only from a source you trust.</string>
+    <string name="forge_turnip_use_bundled">Auto · bundled Turnip 26.3.0 (Adreno 600)</string>
+    <string name="forge_turnip_use_imported">Use imported Turnip</string>
+    <string name="forge_driver_next_start">The selected driver will apply the next time the game opens.</string>
     <string name="forge_turnip_import">Import Turnip ZIP</string>
     <string name="forge_driver_use_system">Use system driver</string>
     <string name="forge_turnip_failed">Could not change the GPU driver.</string>

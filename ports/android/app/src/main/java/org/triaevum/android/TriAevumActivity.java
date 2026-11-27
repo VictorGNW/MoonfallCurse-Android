@@ -60,10 +60,8 @@ public final class TriAevumActivity extends SDLActivity {
 
     @Override public void loadLibraries() {
         StartupDiagnostics.stage(this, "libraries_loading");
-        if (TurnipDriver.imported(this)) {
-            boolean selected = TurnipDriver.select(this);
-            StartupDiagnostics.stage(this, selected ? "turnip_selected" : "turnip_unavailable_using_system");
-        }
+        if (TurnipDriver.available(this))
+            StartupDiagnostics.stage(this, TurnipDriver.select(this));
         try {
             super.loadLibraries();
         } catch (RuntimeException | UnsatisfiedLinkError error) {
