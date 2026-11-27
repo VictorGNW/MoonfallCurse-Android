@@ -777,6 +777,9 @@ void GfxRenderingAPIVulkan::Shutdown() {
         mNativeUiOverlayPass.Shutdown();
         mSceneCompositePass.Shutdown();
         mSmaa1xPass.Shutdown();
+#ifdef __ANDROID__
+        DestroyBcnAstcPipeline();
+#endif
         mNriEffectGraphTransientImageArena.Shutdown();
         mTemporalAaPass.Shutdown();
         mInteractiveGrassPass.Shutdown();
@@ -848,6 +851,9 @@ void GfxRenderingAPIVulkan::Shutdown() {
             frame.RetiredUniformBuffers.clear();
             for (auto& buffer : frame.RetiredVertexBuffers) DestroyBuffer(buffer);
             frame.RetiredVertexBuffers.clear();
+#ifdef __ANDROID__
+            ResetBcnAstcFrame(frame, true);
+#endif
         }
         for (auto& [key, shader] : mShaders) {
             if (shader.VertexShader != VK_NULL_HANDLE) {

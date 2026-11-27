@@ -1,4 +1,5 @@
 #include "fast/extension/azahar_texture_pack_import.h"
+#include "bcn_dds.h"
 
 #include <nlohmann/json.hpp>
 
@@ -120,6 +121,20 @@ std::optional<std::string> PngHeaderProblem(const fs::path& file, const std::str
     return std::nullopt;
 }
 
+std::optional<std::string> BcnDdsProblem(const fs::path& file, uint64_t bytes, const std::string& shown) {
+    std::ifstream input(file, std::ios::binary);
+    if (!input) return "Cannot read " + shown;
+    std::array<uint8_t, Oot3d::Renderer::kMaxBcnDdsHeaderBytes> header{};
+    input.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+    if (input.bad()) return "Cannot read " + shown;
+    try {
+        Oot3d::Renderer::ValidateBcnDds(std::span<const uint8_t>(header).first(input.gcount()), bytes);
+        return std::nullopt;
+    } catch (const std::runtime_error& error) {
+        return shown + ": " + error.what();
+    }
+}
+
 std::optional<nlohmann::json> ReadJsonObject(const fs::path& file, std::string* problem) {
     std::ifstream input(file, std::ios::binary);
     if (!input) {
@@ -189,7 +204,7 @@ struct SourceFile {
     uint64_t Bytes = 0;
 };
 
-enum class FileKind : uint8_t { Png, NotLoadedYet, Json, Skipped };
+enum class FileKind : uint8_t { Png, Dds, NotLoadedYet, Json, Skipped };
 
 struct PackFile {
     fs::path Source;
@@ -339,7 +354,8 @@ AzaharTexturePackImportResult ImportAzaharTexturePack(const AzaharTexturePackImp
         const auto shown = GenericUtf8(entry.Relative);
         const auto extension = Lowercase(PathToUtf8(entry.Relative.extension()));
         if (extension == ".png") entry.Kind = FileKind::Png;
-        else if (extension == ".dds" || extension == ".ktx") entry.Kind = FileKind::NotLoadedYet;
+        else if (extension == ".dds") entry.Kind = FileKind::Dds;
+        else if (extension == ".ktx") entry.Kind = FileKind::NotLoadedYet;
         else if (extension == ".json") entry.Kind = FileKind::Json;
         if (entry.Kind == FileKind::Skipped) {
             ++result.Skipped;
@@ -362,6 +378,8 @@ AzaharTexturePackImportResult ImportAzaharTexturePack(const AzaharTexturePackImp
         if (entry.Kind == FileKind::Png) {
             if (auto problem = PngHeaderProblem(entry.Source, shown)) return Refuse(std::move(*problem));
         }
+        if (entry.Kind == FileKind::Dds && BcnDdsProblem(entry.Source, entry.Bytes, shown))
+            entry.Kind = FileKind::NotLoadedYet;
         if (entry.Kind == FileKind::Json) {
             if (entry.Bytes > kMaximumJsonBytes) {
                 return Refuse(shown + " is larger than " + std::to_string(kMaximumJsonBytes) + " bytes");
@@ -374,11 +392,11 @@ AzaharTexturePackImportResult ImportAzaharTexturePack(const AzaharTexturePackImp
         pack.push_back(std::move(entry));
     }
     const auto loads = [&](const PackFile& file) {
-        return file.Kind == FileKind::Png && (HasAzaharTextureStem(file.Relative) ||
+        return (file.Kind == FileKind::Png || file.Kind == FileKind::Dds) && (HasAzaharTextureStem(file.Relative) ||
                                               mappedNames.contains(Lowercase(PathToUtf8(file.Relative.filename()))));
     };
     const size_t loadable = static_cast<size_t>(std::count_if(pack.begin(), pack.end(), loads));
-    if (loadable == 0U) return Refuse("This does not look like a texture pack: it has no tex1_..._....png textures");
+    if (loadable == 0U) return Refuse("This does not look like a texture pack: it has no supported PNG or BCn DDS textures");
 
     // 4. Copy into a staging sibling of the destination and verify it.
     const fs::path parent = destination.parent_path();
@@ -416,6 +434,9 @@ AzaharTexturePackImportResult ImportAzaharTexturePack(const AzaharTexturePackImp
         if (file.Kind == FileKind::Png) {
             if (auto problem = PngHeaderProblem(target, shown)) return Refuse(std::move(*problem));
         }
+        if (file.Kind == FileKind::Dds) {
+            if (auto problem = BcnDdsProblem(target, copied, shown)) return Refuse(std::move(*problem));
+        }
         if (file.Kind == FileKind::NotLoadedYet) ++result.NotLoadedYet;
     }
     result.Textures = loadable;
@@ -446,7 +467,7 @@ AzaharTexturePackImportResult ImportAzaharTexturePack(const AzaharTexturePackImp
     result.SourceTitleId = sourceTitle;
     result.Message = "Imported " + Plural(result.Textures, "texture", "textures") + " into " + PathToUtf8(destination);
     if (result.NotLoadedYet != 0U)
-        result.Message += "; " + Plural(result.NotLoadedYet, "DDS/KTX file is", "DDS/KTX files are") + " not loaded yet";
+        result.Message += "; " + Plural(result.NotLoadedYet, "compressed texture file is", "compressed texture files are") + " unsupported";
     if (result.Skipped != 0U)
         result.Message += "; " + Plural(result.Skipped, "other file was", "other files were") + " skipped";
     if (sourceTitle && *sourceTitle != request.InstalledTitleId) {

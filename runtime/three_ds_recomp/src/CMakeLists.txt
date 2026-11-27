@@ -209,6 +209,10 @@ if(THREE_DS_RECOMP_ENABLE_VULKAN)
     endforeach()
     triaevum_add_spirv_pack(three_ds_recomp_runtime fast/extension/pica_uber_fragment_binaries.cpp
         fast/extension/pica_native_lighting_uber.spvpack)
+    if(ANDROID)
+        triaevum_add_spirv_pack(three_ds_recomp_runtime fast/backends/gfx_vulkan_bcn_astc.cpp
+            fast/extension/third_party/bcn_layer/astc_encoder.spv)
+    endif()
     target_link_libraries(three_ds_recomp_runtime PRIVATE ${CMAKE_DL_LIBS})
     target_link_libraries(three_ds_recomp_runtime PUBLIC Vulkan::Vulkan PRIVATE three_ds_recomp_shaderc)
     if(THREE_DS_RECOMP_ENABLE_NRI)

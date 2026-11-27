@@ -756,6 +756,9 @@ void GfxRenderingAPIVulkan::StartFrame() {
     frame.RetiredUniformBuffers.clear();
     for (auto& buffer : frame.RetiredVertexBuffers) DestroyBuffer(buffer);
     frame.RetiredVertexBuffers.clear();
+#ifdef __ANDROID__
+    ResetBcnAstcFrame(frame, false);
+#endif
     for (auto material = mNativePicaMaterials.begin(); material != mNativePicaMaterials.end();) {
         if (mFrameCounter <= material->second.LastUsedFrame + 240U) {
             ++material;

@@ -77,6 +77,32 @@ the device. The libraries cannot run on the publisher: the on-device Forge
 checks the runtime/title pair before it installs. The translated and build
 source archives the catalog names are published beside the APK, not inside it.
 
+## BCn texture packs
+
+Forge accepts 2D DDS replacements in BC1, BC2, BC3, unsigned BC4/BC5 and
+BC7, with a maximum extent of 4096×4096. It preserves DDS mip levels and the
+DX10 sRGB flag. If a hash has both a PNG and a DDS in the same pack, Forge's
+renderer continues to prefer the PNG.
+
+On Android's modern Vulkan 1.2+ renderer, DDS color replacements use the
+ASTC 4×4 compute shader from [leegao/bcn_layer shader-v3](https://github.com/leegao/bcn_layer/releases/tag/shader-v3)
+when the device supports compute, ASTC LDR sampling and transfer, FP16 and
+Int8 shader arithmetic. Format support is queried for the selected Vulkan
+driver, including Turnip. The existing texture-pack worker decodes BCn to
+RGBA8 with [bcdec](https://github.com/iOrange/bcdec/tree/80859ed3b7afb1c527a2a99d70c61457bea72d0c),
+and the Vulkan upload records the encode and copy in the current frame.
+Temporary buffers are released after the frame fence. This reduces the
+resident Vulkan image size for these textures. First-use pipeline compilation
+and uploads still have a cost.
+
+The installer's **Disable BCn transcoding if textures look incorrect**
+checkbox applies the next time the game starts. With the checkbox selected,
+with unsupported devices or with an encode setup failure, DDS replacements
+use the existing RGBA8 upload. Vulkan 1.1 never attempts the ASTC pass.
+Native PICA textures, PNGs, and PBR sidecars use their existing upload paths.
+KTX, BC6H and signed BC4/BC5 are outside the supported DDS path. The native log
+reports the capability decision and whether the compute pipeline was created.
+
 ## Linux Build
 
 Qualified compiler for this foundation: Android NDK r29 (`29.0.14206865`),

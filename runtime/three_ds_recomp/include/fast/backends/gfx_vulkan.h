@@ -516,6 +516,10 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
         // Vertex arenas replaced mid-frame by EnsureFrameVertexCapacity;
         // recorded draws still read them until the frame's fence completes.
         std::vector<BufferAllocation> RetiredVertexBuffers;
+#ifdef __ANDROID__
+        VkDescriptorPool AstcDescriptorPool = VK_NULL_HANDLE;
+        std::vector<BufferAllocation> RetiredAstcBuffers;
+#endif
     };
 
     struct CachedVertexBuffer {
@@ -1273,6 +1277,14 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
                                       uint32_t mipLevels, VkFormat format,
                                       bool storageView = false,
                                       std::span<const uint8_t> lowerLevels = {});
+#ifdef __ANDROID__
+    bool TryUploadBcnAsAstc(TextureRecord& texture, std::span<const uint8_t> pixels,
+                           std::span<const uint8_t> lowerLevels, uint32_t width,
+                           uint32_t height, uint32_t mipLevels, VkFormat rgbaFormat);
+    bool CreateBcnAstcPipeline();
+    void DestroyBcnAstcPipeline();
+    void ResetBcnAstcFrame(FrameResources& frame, bool shutdown);
+#endif
     void UploadNativePicaTextureRows(TextureRecord& texture,
                                     std::span<const uint8_t> pixels,
                                     uint32_t width, uint32_t height,
@@ -1375,6 +1387,17 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     void StoreDlssFeatureRecord();
     NativePicaPreparationCounters mNativePicaPreparationCounters;
     bool mNativePicaPreparationSummaryLogged = false;
+#ifdef __ANDROID__
+    bool mBcnAstcEnabled = false;
+    bool mBcnAstcSrgbSupported = false;
+    bool mBcnAstcPipelineAttempted = false;
+    bool mBcnAstcUploadFailureLogged = false;
+    VkDeviceSize mBcnAstcBufferAlignment = 0;
+    VkDeviceSize mBcnAstcMaxBufferRange = 0;
+    VkPipeline mBcnAstcPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout mBcnAstcPipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout mBcnAstcSetLayout = VK_NULL_HANDLE;
+#endif
     bool mNisVulkanFeaturesEnabled = false;
     bool mFsrVulkanFeaturesEnabled = false;
     bool mD3d12InteropExtensionsEnabled = false;

@@ -39,9 +39,11 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import org.json.JSONObject
 import org.triaevum.android.R
 import org.triaevum.android.GameSession
+import org.triaevum.android.BcnTranscoding
 import org.triaevum.android.TurnipDriver
 import org.triaevum.android.diagnostics.DiagnosticsActivity
 import org.triaevum.android.diagnostics.StartupDiagnostics
@@ -1546,6 +1548,22 @@ class InstallerActivity : Activity() {
                     setOnClickListener { chooseGpuDriver() }
                 }), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             }
+            addView(CheckBox(context).apply {
+                text = getString(R.string.forge_disable_bcn_transcoding)
+                setTextColor(TEXT_COLOR)
+                buttonTintList = ColorStateList.valueOf(ACCENT_COLOR)
+                minHeight = dp(48)
+                isChecked = BcnTranscoding.isDisabled(context)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked == BcnTranscoding.isDisabled(context)) return@setOnCheckedChangeListener
+                    try {
+                        BcnTranscoding.setDisabled(context, checked)
+                    } catch (_: java.io.IOException) {
+                        isChecked = BcnTranscoding.isDisabled(context)
+                        Toast.makeText(context, R.string.forge_bcn_setting_failed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             addView(styleButton(languageButton), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT)
                 .apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(8) })
         }

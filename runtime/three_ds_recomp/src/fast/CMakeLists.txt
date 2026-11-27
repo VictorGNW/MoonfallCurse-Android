@@ -44,6 +44,8 @@ if(NOT THREE_DS_RECOMP_ENABLE_VULKAN)
         "^backends/(gfx_vulkan|oot3d_vulkan_(gpu_profiler|validation)).*")
 endif()
 
+# The Android ASTC encoder translation unit carries an embedded SPIR-V shader.
+list(REMOVE_ITEM Source_Files__Graphic "backends/gfx_vulkan_bcn_astc.cpp")
 source_group("graphic" FILES ${Source_Files__Graphic})
 target_sources(three_ds_recomp_runtime PRIVATE ${Source_Files__Graphic})
 

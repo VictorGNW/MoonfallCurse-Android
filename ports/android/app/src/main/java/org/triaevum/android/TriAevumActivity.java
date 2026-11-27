@@ -45,6 +45,11 @@ public final class TriAevumActivity extends SDLActivity {
         StartupDiagnostics.beginGameSession(this);
         StartupDiagnostics.stage(this, "activity_created");
         applyDeveloperEnvironment();
+        try {
+            Os.setenv(BcnTranscoding.ENVIRONMENT_KEY, BcnTranscoding.isDisabled(this) ? "1" : "0", true);
+        } catch (android.system.ErrnoException error) {
+            Log.w("TriAevum", "Unable to apply BCn transcoding setting", error);
+        }
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (!mBrokenLibraries) {

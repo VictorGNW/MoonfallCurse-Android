@@ -580,7 +580,34 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
     // FP16 shader permutations and update-after-bind image descriptors.
     // Advertise to NRI only features that are also enabled on the wrapped
     // device; otherwise IsUpscalerSupported can return a false positive.
+#ifdef __ANDROID__
+    mBcnAstcPipelineAttempted = false;
+    mBcnAstcUploadFailureLogged = false;
+    const char* bcnOptOut = std::getenv("TRIAEVUM_DISABLE_BCN_TRANSCODING");
+    const bool bcnRequested = bcnOptOut == nullptr || std::string_view(bcnOptOut) != "1";
+    constexpr VkFormatFeatureFlags astcRequired = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    VkFormatProperties astcProperties{};
+    vkGetPhysicalDeviceFormatProperties(mPhysicalDevice, VK_FORMAT_ASTC_4x4_UNORM_BLOCK, &astcProperties);
+    mBcnAstcEnabled = bcnRequested && hasVulkan12 && graphicsQueueCount > 0U &&
+        (queueFamilyProperties[mGraphicsQueueFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0U &&
+        supportedFeatures.features.textureCompressionASTC_LDR == VK_TRUE &&
+        vulkan12.shaderFloat16 == VK_TRUE && vulkan12.shaderInt8 == VK_TRUE &&
+        (astcProperties.optimalTilingFeatures & astcRequired) == astcRequired;
+    if (mBcnAstcEnabled) {
+        features.textureCompressionASTC_LDR = VK_TRUE;
+        vkGetPhysicalDeviceFormatProperties(mPhysicalDevice, VK_FORMAT_ASTC_4x4_SRGB_BLOCK, &astcProperties);
+        mBcnAstcSrgbSupported = (astcProperties.optimalTilingFeatures & astcRequired) == astcRequired;
+        mBcnAstcBufferAlignment = std::max<VkDeviceSize>(16U, limits.minStorageBufferOffsetAlignment);
+        mBcnAstcMaxBufferRange = limits.maxStorageBufferRange;
+    }
+    std::fprintf(stderr, "TRIAEVUM_BCN_ASTC mode=%s\n",
+                 mBcnAstcEnabled ? "available" : (bcnRequested ? "unsupported" : "disabled"));
+#endif
     vulkan12 = Renderer3ds::PicaVulkan12Features(vulkan12);
+#ifdef __ANDROID__
+    vulkan12.shaderInt8 = mBcnAstcEnabled ? VK_TRUE : VK_FALSE;
+#endif
     mNisVulkanFeaturesEnabled =
         features.shaderStorageImageWriteWithoutFormat == VK_TRUE &&
         vulkan12.timelineSemaphore == VK_TRUE &&
