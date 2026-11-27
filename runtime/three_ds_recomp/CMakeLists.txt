@@ -299,6 +299,17 @@ if(THREE_DS_RECOMP_ENABLE_VULKAN)
 					-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/nri_destroy_lifetime.cmake
 			)
 		endif()
+		if(ANDROID AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND
+		   CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$" AND THREE_DS_RECOMP_ENABLE_NRI_NIS)
+			# ShaderMake pinned by NRI picks the DXC archive by target OS.
+			# The compiler runs on this Linux host, not on Android.
+			FetchContent_Declare(dxc
+				URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/linux_dxc_2026_02_20.x86_64.tar.gz
+				URL_HASH SHA256=a1d3e3b5e1c5685b3eb27d5e8890e41d87df45def05112a2d6f1a63a931f7d60
+				DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+			set(NRI_SHADERS_PATH "${CMAKE_CURRENT_BINARY_DIR}/nri-shaders"
+				CACHE STRING "" FORCE)
+		endif()
 		if(ANDROID AND CMAKE_HOST_WIN32 AND THREE_DS_RECOMP_ENABLE_NRI_NIS)
 			# ShaderMake is a host tool, but its predicted path takes the Android
 			# (empty) executable suffix. A normal variable here shadows that cache

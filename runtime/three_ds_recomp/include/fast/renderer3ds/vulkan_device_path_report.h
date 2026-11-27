@@ -32,6 +32,11 @@ inline const char* VulkanDriverLabel(VkDriverId driver) {
     case VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS: return "intel_proprietary_windows";
     case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA: return "intel_mesa_anv";
     case VK_DRIVER_ID_MOLTENVK: return "moltenvk";
+    case VK_DRIVER_ID_ARM_PROPRIETARY: return "arm_proprietary";
+    case VK_DRIVER_ID_QUALCOMM_PROPRIETARY: return "qualcomm_proprietary";
+    case VK_DRIVER_ID_SAMSUNG_PROPRIETARY: return "samsung_proprietary";
+    case VK_DRIVER_ID_MESA_PANVK: return "mesa_panvk";
+    case VK_DRIVER_ID_MESA_TURNIP: return "mesa_turnip";
     default: return "other";
     }
 }

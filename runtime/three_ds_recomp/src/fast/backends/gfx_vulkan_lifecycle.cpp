@@ -323,13 +323,16 @@ void GfxRenderingAPIVulkan::Init() {
             // Leave large snapshots to clean shutdown. The driver's size
             // query lets the periodic worker skip the allocation and copy.
             flushPolicy.MinimumIntervalSeconds = 60.0;
-            constexpr uint64_t snapshotBudget = 128ULL * 1024ULL * 1024ULL;
+            constexpr uint64_t snapshotBudget = Renderer3ds::kMaximumAndroidPeriodicNriSnapshotBytes;
 #else
             constexpr uint64_t snapshotBudget = kMaximumNriPipelineCacheBytes;
 #endif
             mNriPipelineCacheFlusher.Start(
                 nriCachePath, MakePipelineCacheHeader(properties), snapshotBudget,
-                [this] { return mNriPicaPipelineBridge.GetPipelineCacheData(snapshotBudget); }, flushPolicy);
+                [this] {
+                    if (mDeviceLossReported.load()) return std::vector<uint8_t>{};
+                    return mNriPicaPipelineBridge.GetPipelineCacheData(snapshotBudget);
+                }, flushPolicy);
         }
     }
     LoadDlssFeatureRecord();
@@ -733,7 +736,7 @@ void GfxRenderingAPIVulkan::Shutdown() {
     if (mDevice != VK_NULL_HANDLE) {
         WaitForAllPresents();
         StopPresentWorker();
-        vkDeviceWaitIdle(mDevice);
+        ReportDeviceLoss(vkDeviceWaitIdle(mDevice), "vkDeviceWaitIdle(shutdown)");
         // Preparation still running finishes first: what it creates belongs
         // in the persisted pipeline caches.
         JoinStartupPreparation();

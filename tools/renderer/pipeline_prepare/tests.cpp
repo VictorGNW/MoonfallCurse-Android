@@ -154,19 +154,34 @@ int main() {
             // The flusher persists the snapshot through the same atomic store.
             std::atomic<int> snapshots{0};
             Renderer3ds::PipelineCacheFlusher flusher;
-            Renderer3ds::PipelineCacheFlushPolicy immediate;
-            immediate.MinimumIntervalSeconds = 0.0;
+            Renderer3ds::PipelineCacheFlushPolicy scheduled;
+            scheduled.MinimumNewPipelines = 3;
+            scheduled.MinimumIntervalSeconds = 0.05;
+            const auto awaitFlush = [&] {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                while (flusher.Stats().Flushes == 0 && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                Check(flusher.Stats().Flushes == 1 && flusher.Stats().FlushedBytes == bytes.size());
+            };
             flusher.Start(path, identity, Renderer3ds::kMaximumNriPipelineCacheBytes,
-                          [&] { ++snapshots; return bytes; }, immediate);
+                          [&] { ++snapshots; return bytes; }, scheduled);
             Check(flusher.Running() && flusher.Stats().Flushes == 0);
+            flusher.Notice(2);
             flusher.Notice(3);
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-            while (flusher.Stats().Flushes == 0 && std::chrono::steady_clock::now() < deadline)
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            Check(flusher.Stats().Flushes == 1 && flusher.Stats().FlushedBytes == bytes.size());
+            flusher.Notice(1);  // A stale report cannot put the count below the threshold.
+            awaitFlush();
             Check(Renderer3ds::LoadPipelineCacheData(path, identity, read) && read == bytes);
             flusher.Stop();
             Check(!flusher.Running() && snapshots == 1);
+
+            // The first report in a second session can equal the last report
+            // from the previous session. It still represents new pipelines.
+            flusher.Start(path, identity, Renderer3ds::kMaximumNriPipelineCacheBytes,
+                          [&] { ++snapshots; return bytes; }, scheduled);
+            flusher.Notice(3);
+            awaitFlush();
+            flusher.Stop();
+            Check(snapshots == 2);
         }
         std::filesystem::remove(path);
 

@@ -4130,7 +4130,8 @@ bool GfxRenderingAPIVulkan::SubmitPicaDraw(
             shadingRate = Renderer3ds::PicaVrs::DrawRate(
                 true, draw.DepthTestEnabled || draw.DepthWriteEnabled,
                 fragment.find("gl_FragDepth") != std::string_view::npos,
-                RunsDiscardingAlphaTest(draw) || fragment.find("discard") != std::string_view::npos);
+                RunsDiscardingAlphaTest(draw) || fragment.find("discard") != std::string_view::npos,
+                mNativePicaSampleCount);
         }
         nriDraw.ShadingRate = shadingRate;
         // Records the draw once per scissor part with `drawPipeline` (the

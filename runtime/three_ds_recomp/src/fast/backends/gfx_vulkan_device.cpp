@@ -433,6 +433,8 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
                 mPhysicalDevice, &props);
         }
         std::string rates;
+        VkSampleCountFlags samples2x2 = 0;
+        VkSampleCountFlags samples4x4 = 0;
         if (hasShadingRate && shadingRateFeatures.pipelineFragmentShadingRate == VK_TRUE) {
             auto getRates = reinterpret_cast<PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR>(
                 vkGetInstanceProcAddr(mInstance, "vkGetPhysicalDeviceFragmentShadingRatesKHR"));
@@ -442,6 +444,11 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
                     count, {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR});
                 if (getRates(mPhysicalDevice, &count, list.data()) == VK_SUCCESS) {
                     for (uint32_t i = 0; i < count; ++i) {
+                        const auto& rate = list[i];
+                        if (rate.fragmentSize.width == 2 && rate.fragmentSize.height == 2)
+                            samples2x2 |= rate.sampleCounts;
+                        if (rate.fragmentSize.width == 4 && rate.fragmentSize.height == 4)
+                            samples4x4 |= rate.sampleCounts;
                         char entry[48];
                         std::snprintf(entry, sizeof(entry), "%s%ux%u:%x", rates.empty() ? "" : ",",
                                       list[i].fragmentSize.width, list[i].fragmentSize.height,
@@ -484,21 +491,23 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
             std::fprintf(stderr, "TRIAEVUM_VRS enabled=0 reason=android_default\n");
         }
 #endif
-        uint8_t skyRate = Renderer3ds::PicaVrs::RequestedSkyRate();
-        if (skyRate == Renderer3ds::PicaVrs::kRate4x4 &&
-            (p.maxFragmentSize.width < 4U || p.maxFragmentSize.height < 4U))
-            skyRate = Renderer3ds::PicaVrs::kRate2x2;
-        shadingRateEnabled = policy != Renderer3ds::PicaVrs::SkyPolicy::Off && hasShadingRate &&
-            shadingRateFeatures.pipelineFragmentShadingRate == VK_TRUE;
+        const auto requestedRate = Renderer3ds::PicaVrs::RequestedSkyRate();
+        const auto skyRate = Renderer3ds::PicaVrs::ResolveSkyRate(
+            requestedRate, VK_SAMPLE_COUNT_1_BIT, samples2x2, samples4x4);
+        shadingRateEnabled = policy != Renderer3ds::PicaVrs::SkyPolicy::Off &&
+            skyRate != Renderer3ds::PicaVrs::kRate1x1;
         if (shadingRateEnabled) {
             extensions.push_back(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
-            Renderer3ds::PicaVrs::gSkyRate.store(skyRate);
+            Renderer3ds::PicaVrs::gSkyRate.store(requestedRate);
+            Renderer3ds::PicaVrs::gSamples2x2.store(samples2x2);
+            Renderer3ds::PicaVrs::gSamples4x4.store(samples4x4);
             Renderer3ds::PicaVrs::gPolicy.store(static_cast<uint8_t>(policy));
         }
         if (policy != Renderer3ds::PicaVrs::SkyPolicy::Off)
             std::fprintf(stderr, "TRIAEVUM_VRS enabled=%u policy=%s sky_rate=%s\n", unsigned(shadingRateEnabled),
                          policy == Renderer3ds::PicaVrs::SkyPolicy::Atmosphere ? "atmosphere" : "clouds",
-                         skyRate == Renderer3ds::PicaVrs::kRate4x4 ? "4x4" : "2x2");
+                         skyRate == Renderer3ds::PicaVrs::kRate4x4 ? "4x4" :
+                         skyRate == Renderer3ds::PicaVrs::kRate2x2 ? "2x2" : "1x1");
     }
     if (mSynchronization2Enabled)
         extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
@@ -621,11 +630,11 @@ void GfxRenderingAPIVulkan::CreateLogicalDevice() {
     }
     createInfo.pNext = featureChain;
     CheckVk(vkCreateDevice(mPhysicalDevice, &createInfo, nullptr, &mDevice), "vkCreateDevice");
-    if (shadingRateEnabled) {
-        Renderer3ds::PicaVrs::gCmdSetRate = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
-            vkGetDeviceProcAddr(mDevice, "vkCmdSetFragmentShadingRateKHR"));
-        Renderer3ds::PicaVrs::gDynamic.store(Renderer3ds::PicaVrs::gCmdSetRate != nullptr);
-    }
+    Renderer3ds::PicaVrs::gCmdSetRate = shadingRateEnabled
+        ? reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
+              vkGetDeviceProcAddr(mDevice, "vkCmdSetFragmentShadingRateKHR"))
+        : nullptr;
+    Renderer3ds::PicaVrs::gDynamic.store(Renderer3ds::PicaVrs::gCmdSetRate != nullptr);
     vkGetDeviceQueue(mDevice, mGraphicsQueueFamily, 0, &mGraphicsQueue);
     vkGetDeviceQueue(mDevice, mPresentQueueFamily,
                      queuePlan.PresentQueueIndex, &mPresentQueue);
@@ -710,11 +719,12 @@ void GfxRenderingAPIVulkan::StorePipelineCache() {
     // No flush may race the final store below.
     mNriPipelineCacheFlusher.Stop();
     const auto flushes = mNriPipelineCacheFlusher.Stats();
-    if (flushes.Flushes != 0 || flushes.Failures != 0)
-        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH summary flushes=%llu bytes=%llu failures=%llu\n",
+    if (flushes.Flushes != 0 || flushes.Failures != 0 || flushes.Skipped != 0)
+        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH summary flushes=%llu bytes=%llu failures=%llu skipped=%llu\n",
                      static_cast<unsigned long long>(flushes.Flushes),
                      static_cast<unsigned long long>(flushes.FlushedBytes),
-                     static_cast<unsigned long long>(flushes.Failures));
+                     static_cast<unsigned long long>(flushes.Failures),
+                     static_cast<unsigned long long>(flushes.Skipped));
     const auto statistics = mNriPicaPipelineBridge.PipelineStatistics();
     mDiagnostics.SetNriPipelineStatistics(statistics.InitialCacheBytes,
         statistics.CreationAttempts, statistics.Created, statistics.CreationNanoseconds);
@@ -806,6 +816,10 @@ void GfxRenderingAPIVulkan::StorePipelineCache() {
                  static_cast<unsigned long long>(copyTiming.Materializations),
                  static_cast<unsigned long long>(copyTiming.PrefixWaits),
                  static_cast<unsigned long long>(copyTiming.PeakLiveProducers));
+    if (mDeviceLossReported.load()) {
+        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_STORE result=skipped reason=device_lost\n");
+        return;
+    }
     const auto nriData = mNriPicaPipelineBridge.GetPipelineCacheData();
     if (!nriData.empty()) {
         VkPhysicalDeviceProperties properties{};
@@ -814,16 +828,8 @@ void GfxRenderingAPIVulkan::StorePipelineCache() {
         std::string error;
         // stderr as well: the logger may already be quiet at shutdown, and a
         // cache that silently stops being stored costs every later session.
-        if (nriData.size() > kMaximumNriPipelineCacheBytes) {
-            // Too large to keep growing: drop it, so the next session rebuilds
-            // a cache of what it actually uses instead of loading a stale one.
-            std::error_code removed;
-            std::filesystem::remove(nriPath, removed);
-            std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_STORE result=dropped bytes=%zu limit=%llu\n",
-                         nriData.size(), static_cast<unsigned long long>(kMaximumNriPipelineCacheBytes));
-            SPDLOG_WARN("NRI PICA pipeline cache: {} bytes over the limit, dropped", nriData.size());
-        } else if (StorePipelineCacheData(nriPath, MakePipelineCacheHeader(properties), nriData, &error,
-                                          kMaximumNriPipelineCacheBytes)) {
+        if (StorePipelineCacheData(nriPath, MakePipelineCacheHeader(properties), nriData, &error,
+                                   kMaximumNriPipelineCacheBytes)) {
             std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_STORE result=stored bytes=%zu\n", nriData.size());
             SPDLOG_INFO("NRI PICA pipeline cache: stored {} bytes", nriData.size());
         } else {
@@ -1172,6 +1178,9 @@ void GfxRenderingAPIVulkan::CreateNoPresentTargets(VkFormat format,
 
 void GfxRenderingAPIVulkan::CreateSwapchainResources() {
     const auto support = QuerySwapchainSupport(mPhysicalDevice);
+    if (support.Formats.empty() || support.PresentModes.empty()) {
+        throw std::runtime_error("Vulkan surface offers no swapchain format or present mode");
+    }
     const VkSurfaceFormatKHR surfaceFormat = ChooseSurfaceFormat(support.Formats);
     const VkPresentModeKHR presentMode = ChoosePresentMode(support.PresentModes);
     const VkExtent2D extent = ChooseExtent(support.Capabilities);
@@ -1198,6 +1207,7 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
             !mVsyncEnabled && mWindowBackend->CanDisableVsync(),
         });
     if (nriCreated) {
+        mSwapchainCanReadBack = true;
         mDiagnostics.SetVulkanPresentationFallback(
             Oot3dVulkanPresentationFallbackReason::None, {});
         for (VkSemaphore& semaphore : mImageAvailableSemaphores) {
@@ -1226,6 +1236,7 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
             mRenderFinishedSemaphores[index] =
                 mNriSwapchain.ReleaseSemaphore(index);
     } else if (mBenchmarkNoPresent) {
+        mSwapchainCanReadBack = true;
         SPDLOG_WARN("OOT3D Vulkan benchmark no-present mode: frames are rendered "
                     "but never presented");
         CreateNoPresentTargets(surfaceFormat.format, extent);
@@ -1258,9 +1269,13 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
         createInfo.imageArrayLayers = 1;
+        // Scanout draws into a color attachment. Only diagnostic readbacks
+        // require swapchain transfer usage, which is not universal.
+        const auto usage = support.Capabilities.supportedUsageFlags;
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                                (usage & (VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                          VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+        mSwapchainCanReadBack = (createInfo.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U;
         const uint32_t queueFamilies[] = {
             mGraphicsQueueFamily, mPresentQueueFamily};
         if (mGraphicsQueueFamily != mPresentQueueFamily) {
@@ -1487,6 +1502,7 @@ void GfxRenderingAPIVulkan::DestroySwapchainResources() {
     }
     mSwapchainImageViews.clear();
     mSwapchainImages.clear();
+    mSwapchainCanReadBack = false;
     if (mSwapchain != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(mDevice, mSwapchain, nullptr);
         mSwapchain = VK_NULL_HANDLE;
@@ -1498,8 +1514,22 @@ void GfxRenderingAPIVulkan::DestroySwapchainResources() {
     mImagesInFlight.clear();
 }
 
-bool GfxRenderingAPIVulkan::SwapchainSurfaceChanged() const {
+bool GfxRenderingAPIVulkan::SwapchainSurfaceChanged() {
+#if defined(__ANDROID__)
+    SwapchainSupport support;
+    try {
+        support = QuerySwapchainSupport(mPhysicalDevice);
+    } catch (const VulkanCallError& error) {
+        if (error.Result == VK_ERROR_SURFACE_LOST_KHR) {
+            NoteAndroidSurfaceLost("surface_capabilities");
+            return false;
+        }
+        throw;
+    }
+#else
     const auto support = QuerySwapchainSupport(mPhysicalDevice);
+#endif
+    if (support.Formats.empty() || support.PresentModes.empty()) return true;
     const auto extent = ChooseExtent(support.Capabilities);
     const auto format = ChooseSurfaceFormat(support.Formats);
     // SUBOPTIMAL still permits presentation. In particular, compositor rotation
@@ -1510,7 +1540,9 @@ bool GfxRenderingAPIVulkan::SwapchainSurfaceChanged() const {
            support.Capabilities.currentTransform != mSwapchainSurfaceCapabilities.currentTransform ||
            support.Capabilities.supportedTransforms != mSwapchainSurfaceCapabilities.supportedTransforms ||
            support.Capabilities.minImageCount != mSwapchainSurfaceCapabilities.minImageCount ||
-           support.Capabilities.maxImageCount != mSwapchainSurfaceCapabilities.maxImageCount;
+           support.Capabilities.maxImageCount != mSwapchainSurfaceCapabilities.maxImageCount ||
+           support.Capabilities.supportedUsageFlags != mSwapchainSurfaceCapabilities.supportedUsageFlags ||
+           support.Capabilities.supportedCompositeAlpha != mSwapchainSurfaceCapabilities.supportedCompositeAlpha;
 }
 
 void GfxRenderingAPIVulkan::RecreateSwapchain() {
@@ -1532,7 +1564,21 @@ void GfxRenderingAPIVulkan::RecreateSwapchain() {
     // resources. Preserve them (and AO depth bindings) across presentation
     // mode changes; their own reset path handles genuine scene invalidation.
     DestroySwapchainResources();
+#if defined(__ANDROID__)
+    try {
+        CreateSwapchainResources();
+    } catch (const VulkanCallError& error) {
+        if (error.Result == VK_ERROR_SURFACE_LOST_KHR) {
+            NoteAndroidSurfaceLost("recreate_swapchain");
+            return;
+        }
+        if (error.Result == VK_ERROR_OUT_OF_DATE_KHR) return;
+        throw;
+    }
+#else
     CreateSwapchainResources();
+#endif
+    if (mSwapchainDirty) return;
     StartPresentWorker();
     if (mNriPicaScanoutPass.Available() &&
         !mNriPicaScanoutPass.Configure(mSwapchainFormat)) {
@@ -1615,7 +1661,11 @@ VkSurfaceFormatKHR GfxRenderingAPIVulkan::ChooseSurfaceFormat(
             return format;
         }
     }
-    return formats.front();
+    auto selected = formats.front();
+    // Older WSI implementations can advertise any format with this sentinel.
+    if (formats.size() == 1 && selected.format == VK_FORMAT_UNDEFINED)
+        selected.format = VK_FORMAT_B8G8R8A8_UNORM;
+    return selected;
 }
 
 VkPresentModeKHR GfxRenderingAPIVulkan::ChoosePresentMode(
@@ -1728,6 +1778,29 @@ void GfxRenderingAPIVulkan::CreateDepthResources() {
     mDepthImages.resize(count);
     mDepthMemories.resize(count);
     mDepthImageViews.resize(count);
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    uint32_t lazyTypes = 0;
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &memory);
+    for (uint32_t type = 0; type < memory.memoryTypeCount; ++type) {
+        if ((memory.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) != 0U)
+            lazyTypes |= (1U << type);
+    }
+    if (lazyTypes != 0U) {
+        // This swapchain-only depth attachment is discarded at the end of
+        // each render pass. The PICA scene's sampled depth has its own images.
+        const auto transientUsage = usage | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+        VkImageFormatProperties format{};
+        if (vkGetPhysicalDeviceImageFormatProperties(mPhysicalDevice, mDepthFormat, VK_IMAGE_TYPE_2D,
+                VK_IMAGE_TILING_OPTIMAL, transientUsage, 0, &format) == VK_SUCCESS &&
+            mSwapchainExtent.width <= format.maxExtent.width &&
+            mSwapchainExtent.height <= format.maxExtent.height &&
+            (format.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0U) {
+            usage = transientUsage;
+        } else {
+            lazyTypes = 0;
+        }
+    }
     for (size_t index = 0; index < count; ++index) {
         VkImageCreateInfo imageInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1737,7 +1810,7 @@ void GfxRenderingAPIVulkan::CreateDepthResources() {
         imageInfo.format = mDepthFormat;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        imageInfo.usage = usage;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         CheckVk(vkCreateImage(mDevice, &imageInfo, nullptr, &mDepthImages[index]),
@@ -1746,10 +1819,19 @@ void GfxRenderingAPIVulkan::CreateDepthResources() {
         vkGetImageMemoryRequirements(mDevice, mDepthImages[index], &requirements);
         VkMemoryAllocateInfo allocationInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         allocationInfo.allocationSize = requirements.size;
-        allocationInfo.memoryTypeIndex =
-            FindMemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        CheckVk(vkAllocateMemory(mDevice, &allocationInfo, nullptr, &mDepthMemories[index]),
-                "vkAllocateMemory(depth)");
+        VkResult allocated = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        const uint32_t compatibleLazyTypes = requirements.memoryTypeBits & lazyTypes;
+        if (compatibleLazyTypes != 0U) {
+            allocationInfo.memoryTypeIndex =
+                FindMemoryType(compatibleLazyTypes, VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);
+            allocated = vkAllocateMemory(mDevice, &allocationInfo, nullptr, &mDepthMemories[index]);
+        }
+        if (allocated == VK_ERROR_OUT_OF_DEVICE_MEMORY) {
+            allocationInfo.memoryTypeIndex = FindMemoryType(requirements.memoryTypeBits & ~lazyTypes,
+                                                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            allocated = vkAllocateMemory(mDevice, &allocationInfo, nullptr, &mDepthMemories[index]);
+        }
+        CheckVk(allocated, "vkAllocateMemory(depth)");
         CheckVk(vkBindImageMemory(mDevice, mDepthImages[index], mDepthMemories[index], 0),
                 "vkBindImageMemory(depth)");
         VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };

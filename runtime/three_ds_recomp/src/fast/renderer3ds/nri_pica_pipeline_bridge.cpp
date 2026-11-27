@@ -449,15 +449,15 @@ std::vector<uint8_t> NriPicaPipelineBridge::GetPipelineCacheData(uint64_t maximu
     if (!Available() || mImpl->PipelineCache == nullptr) return {};
     auto* core = mImpl->Interop->Core();
     uint64_t size = 0;
-    // With no caller budget, leave the retention policy to the store and
-    // reject only implausible sizes before allocating.
-    constexpr uint64_t kImplausibleBytes = 4ULL * kMaximumNriPipelineCacheBytes;
+    const uint64_t limit = maximumBytes == 0
+        ? kMaximumNriPipelineCacheBytes
+        : std::min(maximumBytes, kMaximumNriPipelineCacheBytes);
     if (core->GetPipelineCacheData(*mImpl->PipelineCache, nullptr, size) != nri::Result::SUCCESS ||
-        size == 0 || size > kImplausibleBytes) return {};
-    if (maximumBytes != 0 && size > maximumBytes) {
-        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH result=deferred bytes=%llu limit=%llu\n",
-                     static_cast<unsigned long long>(size),
-                     static_cast<unsigned long long>(maximumBytes));
+        size == 0) return {};
+    if (size > limit) {
+        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_%s result=deferred bytes=%llu limit=%llu\n",
+                     limit < kMaximumNriPipelineCacheBytes ? "FLUSH" : "SNAPSHOT",
+                     static_cast<unsigned long long>(size), static_cast<unsigned long long>(limit));
         return {};
     }
     std::vector<uint8_t> data(static_cast<size_t>(size));

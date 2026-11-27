@@ -688,11 +688,6 @@ void GfxRenderingAPIVulkan::StartFrame() {
         std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=async_present_out_of_date\n");
         mSwapchainDirty = true;
     }
-    if (mSwapchainSuboptimal.exchange(false) && !mSwapchainDirty) {
-        mSwapchainDirty = SwapchainSurfaceChanged();
-        if (mSwapchainDirty)
-            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=surface_changed\n");
-    }
     const auto presentError = static_cast<VkResult>(mPresentError.exchange(VK_SUCCESS));
     if (presentError != VK_SUCCESS) {
 #if defined(__ANDROID__)
@@ -703,6 +698,26 @@ void GfxRenderingAPIVulkan::StartFrame() {
 #endif
         CheckVk(presentError, "asynchronous vkQueuePresentKHR");
     }
+#if defined(__ANDROID__)
+    // Some compositors report SUBOPTIMAL on every present. Rate limit their
+    // capability queries, while real resize events and OUT_OF_DATE bypass it.
+    const bool resized = mAndroidSurfaceResized.exchange(false);
+    if (!mSwapchainDirty && (resized || mSwapchainSuboptimal.load())) {
+        const auto now = std::chrono::steady_clock::now();
+        if (resized || now >= mNextAndroidSurfaceCheck) {
+            mSwapchainSuboptimal.store(false);
+            mNextAndroidSurfaceCheck = now + std::chrono::milliseconds(250);
+            mSwapchainDirty = SwapchainSurfaceChanged();
+            if (mSwapchainDirty)
+                std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=surface_changed\n");
+        }
+    }
+    if (mAndroidSurfaceLost.load()) return;
+#else
+    if (mSwapchainSuboptimal.exchange(false) && !mSwapchainDirty) {
+        mSwapchainDirty = SwapchainSurfaceChanged();
+    }
+#endif
     if (std::abs(requestedInternalResolutionScale -
                  mInternalResolutionScale) > 0.0005F) {
         ApplyInternalResolutionScale(requestedInternalResolutionScale);
@@ -1010,9 +1025,11 @@ void GfxRenderingAPIVulkan::EndFrame() {
     }
     const auto sceneFrameStats = mPicaSceneFrame.Stats();
     if (sceneFrameStats.DrawCount != 0U) ++mTemporalJitterSequence;
-    mScanoutProbe.Record(mCommandBuffers[mCurrentFrame], mSwapchainImages[mCurrentImage],
-                         mSwapchainFormat, mSwapchainExtent, mCurrentFrame, mCurrentImage,
-                         mFrameCounter, mNativePicaPresentedThisFrame);
+    if (mSwapchainCanReadBack) {
+        mScanoutProbe.Record(mCommandBuffers[mCurrentFrame], mSwapchainImages[mCurrentImage],
+                             mSwapchainFormat, mSwapchainExtent, mCurrentFrame, mCurrentImage,
+                             mFrameCounter, mNativePicaPresentedThisFrame);
+    }
     mDiagnostics.RecordPicaSceneFrame(sceneFrameStats);
     mGpuProfiler.EndFrame(mCurrentFrame, mCommandBuffers[mCurrentFrame]);
     mBreadcrumbs.Record(mCommandBuffers[mCurrentFrame], "frame_end");

@@ -10,6 +10,7 @@
 // --negative asserts the beta.1.2 expectation (library parts on AMD) and must
 // fail: it shows the test tells the two policies apart.
 #include "fast/renderer3ds/vulkan_device_path_report.h"
+#include "fast/renderer3ds/pica_vrs.h"
 
 #include <cstdio>
 #include <cstring>
@@ -77,6 +78,23 @@ int main(int argc, char** argv) {
         const auto optIn = Negotiate("AMD Radeon RX 6600", VK_DRIVER_ID_AMD_PROPRIETARY, true, "1");
         Check(optIn.Libraries.Enabled && std::strcmp(optIn.Libraries.Reason, "explicit_opt_in") == 0,
               "explicit opt-in is reported");
+        Check(std::strcmp(VulkanDriverLabel(VK_DRIVER_ID_ARM_PROPRIETARY), "arm_proprietary") == 0 &&
+                  std::strcmp(VulkanDriverLabel(VK_DRIVER_ID_QUALCOMM_PROPRIETARY), "qualcomm_proprietary") == 0 &&
+                  std::strcmp(VulkanDriverLabel(VK_DRIVER_ID_SAMSUNG_PROPRIETARY), "samsung_proprietary") == 0 &&
+                  std::strcmp(VulkanDriverLabel(VK_DRIVER_ID_MESA_PANVK), "mesa_panvk") == 0 &&
+                  std::strcmp(VulkanDriverLabel(VK_DRIVER_ID_MESA_TURNIP), "mesa_turnip") == 0,
+              "Android driver families are identified in diagnostics");
+
+        using namespace PicaVrs;
+        constexpr VkSampleCountFlags twoByTwo = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
+        constexpr VkSampleCountFlags fourByFour = VK_SAMPLE_COUNT_1_BIT;
+        Check(ResolveSkyRate(kRate4x4, VK_SAMPLE_COUNT_1_BIT, twoByTwo, fourByFour) == kRate4x4,
+              "4x4 is retained when supported");
+        Check(ResolveSkyRate(kRate4x4, VK_SAMPLE_COUNT_4_BIT, twoByTwo, fourByFour) == kRate2x2,
+              "4x4 falls back to 2x2 for a sample count that only supports 2x2");
+        Check(ResolveSkyRate(kRate4x4, VK_SAMPLE_COUNT_8_BIT, twoByTwo, fourByFour) == kRate1x1 &&
+                  ResolveSkyRate(kRate2x2, VK_SAMPLE_COUNT_1_BIT, 0, fourByFour) == kRate1x1,
+              "unsupported sample counts and unrequested coarse rates fall back to 1x1");
         // Other drivers keep their own defaults: RADV (Linux, Steam Deck) links library parts
         // without robust buffer access; NVIDIA likewise.
         for (const auto driver : {VK_DRIVER_ID_MESA_RADV, VK_DRIVER_ID_NVIDIA_PROPRIETARY}) {

@@ -140,10 +140,17 @@ bool LoadTitlePipelineCache(bool nri, const VulkanPipelineCacheHeader& expected,
     return loaded;
 }
 
+struct VulkanCallError : std::runtime_error {
+    VulkanCallError(VkResult result, const char* operation)
+        : std::runtime_error(std::string(operation) + " failed with VkResult " +
+                             std::to_string(static_cast<int>(result))),
+          Result(result) {}
+    VkResult Result;
+};
+
 void CheckVk(VkResult result, const char* operation) {
     if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(operation) + " failed with VkResult " +
-                                 std::to_string(static_cast<int>(result)));
+        throw VulkanCallError(result, operation);
     }
 }
 

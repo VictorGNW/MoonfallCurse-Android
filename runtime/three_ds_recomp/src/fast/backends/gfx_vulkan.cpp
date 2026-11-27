@@ -660,7 +660,7 @@ void GfxRenderingAPIVulkan::OnResize() {
     // Android may send resize events without changing the Vulkan surface.
     // Check the actual configuration at the start of the next frame before
     // discarding the swapchain; OUT_OF_DATE still forces a rebuild.
-    mSwapchainSuboptimal.store(true);
+    mAndroidSurfaceResized.store(true);
 #else
     mSwapchainDirty = true;
 #endif
@@ -909,7 +909,8 @@ void GfxRenderingAPIVulkan::ClearFramebuffer(bool, bool) {
 
 std::vector<uint8_t> GfxRenderingAPIVulkan::ReadSwapchainRgba8(uint32_t& copyWidthOut, uint32_t& copyHeightOut,
                                                                bool& bgraOut) {
-    if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mDevice == VK_NULL_HANDLE ||
+    if (!mSwapchainCanReadBack || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 ||
+        mDevice == VK_NULL_HANDLE ||
         (mSwapchain == VK_NULL_HANDLE && !mNriSwapchain.Active()) ||
         mCurrentFramebuffer != 0) {
         return {};

@@ -106,6 +106,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <compare>
 #include <condition_variable>
 #include <cstdint>
@@ -1061,7 +1062,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     void DestroyTexture(TextureRecord& texture);
     void DestroyBuffer(BufferAllocation& buffer);
     void RecreateSwapchain();
-    bool SwapchainSurfaceChanged() const;
+    bool SwapchainSurfaceChanged();
 #if defined(__ANDROID__)
     // Android surface loss (gfx_vulkan_android_surface.cpp): the Activity's
     // window goes away in the background and comes back as a new one. A lost
@@ -1383,6 +1384,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     std::string mNgxVulkanUnavailableReason;
     VkSwapchainKHR mSwapchain = VK_NULL_HANDLE;
     VkFormat mSwapchainFormat = VK_FORMAT_UNDEFINED;
+    bool mSwapchainCanReadBack = false;
     VkExtent2D mSwapchainExtent{};
     bool mNativeTopScreenExtendsToOutput = true;
     // The presentation picture inside the acquired swapchain: the aspect
@@ -1442,6 +1444,8 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
 #if defined(__ANDROID__)
     // Set by acquire/present (any thread) on VK_ERROR_SURFACE_LOST_KHR.
     std::atomic<bool> mAndroidSurfaceLost{false};
+    std::atomic<bool> mAndroidSurfaceResized{false};
+    std::chrono::steady_clock::time_point mNextAndroidSurfaceCheck{};
     // The ANativeWindow mSurface was created for; SDL replaces it after the
     // Activity's surface was destroyed and created again.
     void* mAndroidNativeWindow = nullptr;
@@ -1546,6 +1550,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     std::set<std::pair<Extension::PicaAotShaderStage, uint64_t>> mPicaAotShaderHitIdentities;
     std::atomic<uint64_t> mPicaAotShaderHits = 0;
     std::atomic<uint64_t> mNativeFragmentArtifactHits = 0;
+    std::atomic<uint64_t> mNativeFragmentArtifactMisses = 0;
     std::atomic<uint64_t> mNativeVertexArtifactHits = 0;
     std::atomic<uint64_t> mPicaAotShaderMisses = 0;
     bool mPicaAotShaderStrict = false;

@@ -57,7 +57,7 @@ class PipelineCacheFlusher final {
 
     void Start(std::filesystem::path path, VulkanPipelineCacheHeader identity, uint64_t maximumBytes,
                Snapshot snapshot, PipelineCacheFlushPolicy policy = {});
-    // Cheap, any thread: the total number of pipelines created so far.
+    // Cheap, any thread: report the cumulative number created since Start().
     void Notice(uint64_t createdTotal);
     // Joins the thread. No final flush: the owner stores the cache itself at
     // shutdown, after the last creation.
@@ -67,7 +67,7 @@ class PipelineCacheFlusher final {
 
   private:
     void Worker();
-    bool FlushOnce(uint64_t created);
+    void FlushOnce(uint64_t created);
 
     std::filesystem::path mPath;
     VulkanPipelineCacheHeader mIdentity{};

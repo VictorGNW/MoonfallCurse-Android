@@ -145,3 +145,40 @@ Device checks to run with a prepared game and matching graphics settings:
 The device available for this pass had no Moonfall Curse installation, so these
 gameplay and lifecycle comparisons remain pending. The first-use Perfetto
 study and thermal adaptation are deferred.
+
+## Cache, memory and Vulkan follow-up
+
+Based on the source of v0.5.0-alpha.2 (`9e7e6e81`).
+
+- The periodic NRI cache writer waits for new pipelines and its next write
+  deadline. The scheduler is adapted from [contatg's Turnip PR][turnip].
+  Android's existing 128 MiB periodic copy limit also applies to the optional
+  Forge GPU prewarm. Shutdown checks the driver-reported size before allocating
+  a snapshot, preserves the last compatible file if the new snapshot is too
+  large, and skips snapshots after a reported Vulkan device loss.
+- Forge releases its cache import buffer before starting pipeline creation.
+  On Android, optional prewarm uses at most two workers by default and checks
+  for low available host memory before creating the Vulkan device. A skipped
+  optional preparation leaves the activated installation playable. The reported
+  Xclipse 540 installation crash still needs device validation.
+- A built-in fragment artifact miss is counted separately from a title AOT
+  pack miss. One source identity feeds both lookups. Use the shader cache
+  summary and the existing slow-step diagnostics to identify actual runtime
+  compilation and its cost.
+- Android rate-limits repeated `VK_SUBOPTIMAL_KHR` capability queries to four per
+  second. A resize event or `VK_ERROR_OUT_OF_DATE_KHR` can still be handled on
+  the next frame. Surface loss during query or recreation uses the
+  existing surface recovery path. Swapchain transfer usage follows the surface
+  flags, and swapchain depth uses lazy allocation where supported.
+- Explicit VRS opt-in checks the enumerated fragment sizes and MSAA sample
+  counts. The device path log distinguishes ARM, Qualcomm, Samsung, PanVK and
+  Turnip by Vulkan driver ID.
+
+The main branch of Ys-Andro's fork enforces 18:9 and was reviewed as a
+viewport change. The contatg fork's Adreno 610 profile and custom loader
+remain isolated for real-device qualification. The Legacy Vulkan 1.1 path,
+SGSR v1 EdgeDir and the proposed mobile preset changes need their own
+integration and hardware checks. This pass does not establish FPS, P95/P99
+or power gains on Adreno, Mali or Xclipse.
+
+[turnip]: https://github.com/contatg/MoonfallCurse-Android/commit/853155d272f8d685bf130c0a8ba934e2bc7bbbb9

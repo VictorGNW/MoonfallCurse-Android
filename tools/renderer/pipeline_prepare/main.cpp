@@ -268,6 +268,12 @@ int TriAevumPipelinePrepareMain(int argc, char** argv) {
         }
         std::vector<Fast::Extension::PicaGraphicsPipelineManifestEntry> entries;
         for (auto& [id, entry] : unique) entries.push_back(std::move(entry));
+#if defined(__ANDROID__)
+        // The installer and the Vulkan driver share a constrained process.
+        // Check immediately before opening the device, after reading recipes.
+        if (Renderer::ShouldRetirePreparationWorker(Renderer::QueryHostMemory(), 2U))
+            throw std::runtime_error("insufficient available memory for optional Android GPU pipeline preparation");
+#endif
         HeadlessDevice device;
         if (!device.Initialize(adapter, validation))
             throw std::runtime_error("headless NRI Vulkan device initialization failed");
@@ -284,18 +290,33 @@ int TriAevumPipelinePrepareMain(int argc, char** argv) {
         execution.PipelineLibrariesAvailable = device.PipelineLibraries;
         execution.PipelineLibrariesEnabled = device.AllPipelinesUseLibraries;
         if (!bridge.Initialize(device, execution)) throw std::runtime_error(bridge.UnavailableReason());
-        std::vector<uint8_t> cache;
-        const bool loaded = Renderer3ds::LoadPipelineCacheData(cachePath, identity, cache,
-                                                               Renderer3ds::kMaximumNriPipelineCacheBytes);
-        if (!bridge.InitializePipelineCache(cache)) throw std::runtime_error("NRI device pipeline cache unavailable");
-        const unsigned workers = Fast::Renderer::PreparationWorkerCount(
-            {std::thread::hardware_concurrency(), device.DriverId == VK_DRIVER_ID_AMD_PROPRIETARY,
-             std::getenv("TRIAEVUM_PIPELINE_PREPARE_THREADS")});
+        bool loaded = false;
+        {
+            // The driver owns its copy once initialization returns. Release the
+            // import buffer before the workers allocate compilation state.
+            std::vector<uint8_t> cache;
+            loaded = Renderer3ds::LoadPipelineCacheData(cachePath, identity, cache,
+                                                         Renderer3ds::kMaximumNriPipelineCacheBytes);
+            if (!bridge.InitializePipelineCache(cache)) throw std::runtime_error("NRI device pipeline cache unavailable");
+        }
+        const char* workerOverride = std::getenv("TRIAEVUM_PIPELINE_PREPARE_THREADS");
+        unsigned workers = Renderer::PreparationWorkerCount(
+            {std::thread::hardware_concurrency(), device.DriverId == VK_DRIVER_ID_AMD_PROPRIETARY, workerOverride});
+#if defined(__ANDROID__)
+        if (!workerOverride || *workerOverride == '\0') workers = std::min(workers, 2U);
+#endif
         // Work survives a kill or an exhausted time budget: the cache is flushed
         // while creation continues, then stored once more at the end.
         Renderer3ds::PipelineCacheFlusher flusher;
-        flusher.Start(cachePath, identity, Renderer3ds::kMaximumNriPipelineCacheBytes,
-                      [&] { return bridge.GetPipelineCacheData(); });
+        Renderer3ds::PipelineCacheFlushPolicy flushPolicy;
+#if defined(__ANDROID__)
+        flushPolicy.MinimumIntervalSeconds = 60.0;
+        constexpr uint64_t snapshotBudget = Renderer3ds::kMaximumAndroidPeriodicNriSnapshotBytes;
+#else
+        constexpr uint64_t snapshotBudget = Renderer3ds::kMaximumNriPipelineCacheBytes;
+#endif
+        flusher.Start(cachePath, identity, snapshotBudget,
+                      [&] { return bridge.GetPipelineCacheData(snapshotBudget); }, flushPolicy);
         const auto cancelled = [&] { return args.contains("--cancel-file") && std::filesystem::exists(args.at("--cancel-file")); };
 
         // The parts the renderer creates before its first frame: the same
@@ -357,7 +378,7 @@ int TriAevumPipelinePrepareMain(int argc, char** argv) {
             });
         flusher.Stop();
         const auto flushes = flusher.Stats();
-        cache = bridge.GetPipelineCacheData();
+        const auto cache = bridge.GetPipelineCacheData();
         if (!Renderer3ds::StorePipelineCacheData(cachePath, identity, cache, &error,
                                                  Renderer3ds::kMaximumNriPipelineCacheBytes))
             throw std::runtime_error(error);
