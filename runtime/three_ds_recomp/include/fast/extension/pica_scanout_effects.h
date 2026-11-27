@@ -10,6 +10,9 @@
 
 namespace Fast::Extension {
 
+inline constexpr uint32_t kPicaScanoutSgsrEdgeDir = 3U;
+inline constexpr uint32_t kPicaScanoutFxaaSgsrEdgeDir = 4U;
+
 struct PicaScanoutPushConstants {
     uint32_t FlipY = 0;
     uint32_t AaMode = 0;
@@ -93,6 +96,7 @@ enum class PicaScanoutOrientation : uint8_t {
     bool separateSampler = false,
     std::optional<int> diagnosticMode = std::nullopt,
     PicaScanoutOrientation orientation =
-        PicaScanoutOrientation::PhysicalScreen);
+        PicaScanoutOrientation::PhysicalScreen,
+    bool includeSgsrEdgeDir = false);
 
 } // namespace Fast::Extension

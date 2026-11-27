@@ -1,4 +1,5 @@
 #include "fast/extension/graphics_settings_persistence.h"
+#include "fast/extension/render_resolution_policy.h"
 #include "fast/extension/title_grass_rules_file.h"
 
 #include <gtest/gtest.h>
@@ -1510,18 +1511,22 @@ TEST(Oot3dGraphicsSettingsPersistence, RoundTripsAndInfersTheOutputProvenance) {
 #endif
 }
 
-// Enhanced for Mobile is Enhanced with exactly four values changed: what else
-// differs from Enhanced would change the phone's look or cost unnoticed.
+// Track the preset's intended differences from the desktop profile.
 TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     using namespace Fast::Extension;
     const auto mobile = GraphicsSettingsService::Preset(GraphicsPreset::EnhancedForMobile);
     const auto enhanced = GraphicsSettingsService::Preset(GraphicsPreset::Enhanced);
     EXPECT_EQ(mobile.Preset, GraphicsPreset::EnhancedForMobile);
     EXPECT_EQ(mobile.FrameRate, FrameRateMode::Interpolated2x);
-    EXPECT_FLOAT_EQ(mobile.InternalResolutionScale, 1.0F);
+    EXPECT_FLOAT_EQ(mobile.InternalResolutionScale, 0.8F);
+    EXPECT_TRUE(mobile.SgsrEdgeDir);
+    EXPECT_FLOAT_EQ(ResolveInternalResolutionScale(mobile, false, 720U), 0.8F);
+    EXPECT_FLOAT_EQ(ResolveInternalResolutionScale(mobile, false, 1080U), 720.0F / 1080.0F);
+    EXPECT_EQ(ScaleRenderExtent({1920, 1080}, ResolveInternalResolutionScale(mobile, false, 1080U)).Height, 720U);
     EXPECT_EQ(mobile.AntiAliasing, AntiAliasingMode::Smaa1x);
     EXPECT_EQ(mobile.MsaaSamples, 1U);
-    EXPECT_EQ(mobile.Anisotropy, 4U);
+    EXPECT_EQ(mobile.Anisotropy, 8U);
+    EXPECT_EQ(mobile.TextureMipLimit, 4U);
     EXPECT_FLOAT_EQ(mobile.FovMultiplier, 1.10F);
     EXPECT_TRUE(mobile.ExtendedDrawDistance);
     EXPECT_EQ(mobile.Grass.MaxInstancesPerRoom, 400000U);
@@ -1533,7 +1538,8 @@ TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     EXPECT_EQ(document["Preset"], "EnhancedForMobile");
     auto reference = SerializeGraphicsSettings(enhanced);
     EXPECT_EQ(reference["Preset"], "Enhanced");
-    for (const auto* path : {"/Preset", "/AA/Mode", "/Grass/Budget/MaxInstancesPerRoom",
+    for (const auto* path : {"/Preset", "/AA/Mode", "/RenderScale", "/SgsrEdgeDir",
+                             "/Textures/Anisotropy", "/Textures/MipLimit", "/Grass/Budget/MaxInstancesPerRoom",
                              "/Effects/Reflections/Water"}) {
         const nlohmann::json::json_pointer pointer{path};
         ASSERT_TRUE(document.contains(pointer)) << path;
@@ -1550,7 +1556,7 @@ TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     EXPECT_EQ(chosen.Preset, GraphicsPreset::EnhancedForMobile);
     EXPECT_EQ(chosen.Aspect, AspectRatioMode::Free);
     EXPECT_EQ(chosen.OutputWidth, 2340U);
-    EXPECT_FLOAT_EQ(chosen.InternalResolutionScale, 1.0F);
+    EXPECT_FLOAT_EQ(chosen.InternalResolutionScale, 0.8F);
     const auto back = GraphicsSettingsService::PresetForCurrent(GraphicsPreset::Enhanced, chosen);
     EXPECT_EQ(back.FrameRate, FrameRateMode::Interpolated2x);
     EXPECT_FLOAT_EQ(back.InternalResolutionScale, 1.0F);
@@ -1560,7 +1566,7 @@ TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     const auto custom = GraphicsSettingsService::PresetForCurrent(GraphicsPreset::Custom, chosen);
     EXPECT_EQ(custom.Preset, GraphicsPreset::Custom);
     EXPECT_EQ(custom.FrameRate, FrameRateMode::Interpolated2x);
-    EXPECT_FLOAT_EQ(custom.InternalResolutionScale, 1.0F);
+    EXPECT_FLOAT_EQ(custom.InternalResolutionScale, 0.8F);
     EXPECT_EQ(GraphicsSettingsService::Validate(chosen, GraphicsCapabilities{}).Value.Preset,
               GraphicsPreset::EnhancedForMobile);
 
@@ -1569,6 +1575,7 @@ TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     ResetDisplaySettings(reset);
     EXPECT_EQ(reset.Preset, GraphicsPreset::Custom);
     EXPECT_EQ(reset.AntiAliasing, AntiAliasingMode::Off);
+    EXPECT_FALSE(reset.SgsrEdgeDir);
     EXPECT_FLOAT_EQ(reset.InternalResolutionScale, 1.0F);
     reset = back;
     ResetDisplaySettings(reset);
@@ -1598,6 +1605,15 @@ TEST(Oot3dGraphicsSettingsPersistence, LoadsConfigurationsWithAndWithoutEnhanced
     EXPECT_EQ(kept.Value.Preset, GraphicsPreset::Enhanced);
     EXPECT_FALSE(kept.NeedsRewrite);
     EXPECT_EQ(SerializeGraphicsSettings(kept.Value), older);
+
+    auto legacyMobile = document;
+    legacyMobile.erase("SgsrEdgeDir");
+    legacyMobile["Textures"].erase("MipLimit");
+    legacyMobile["RenderScale"] = 1.0F;
+    const auto keptMobile = DeserializeGraphicsSettings(legacyMobile, saved);
+    EXPECT_FALSE(keptMobile.Value.SgsrEdgeDir);
+    EXPECT_EQ(keptMobile.Value.TextureMipLimit, 0U);
+    EXPECT_FLOAT_EQ(ResolveInternalResolutionScale(keptMobile.Value, false, 1080U), 1.0F);
 
     // A document from before anisotropic filtering takes the preset's 4x.
     auto withoutTextures = document;

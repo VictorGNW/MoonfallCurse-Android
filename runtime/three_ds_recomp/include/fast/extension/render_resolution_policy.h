@@ -24,11 +24,16 @@ inline constexpr float kMinimumUpscalerRenderScale = 1.0F / 3.0F;
 // no device support) is never planned, so the display is shown unscaled and
 // the frame renders at the user's own scale, as with no upscaler.
 [[nodiscard]] inline float ResolveInternalResolutionScale(
-    const GraphicsSettings& settings, bool upscalerProviderAvailable) {
+    const GraphicsSettings& settings, bool upscalerProviderAvailable, uint32_t outputHeight = 0U) {
     if (settings.AntiAliasing == AntiAliasingMode::Upscaler && upscalerProviderAvailable)
         return std::clamp(1.0F / UpscalerScalingFactor(settings.UpscalerMode),
                           kMinimumUpscalerRenderScale, 1.0F);
-    return std::clamp(settings.InternalResolutionScale, 0.5F, 2.0F);
+    const float requested = std::clamp(settings.InternalResolutionScale, 0.5F, 2.0F);
+    // Existing mobile configurations without the revised SGSR setting keep
+    // their saved render scale until the player reapplies the preset.
+    if (settings.Preset == GraphicsPreset::EnhancedForMobile && settings.SgsrEdgeDir && outputHeight > 720U)
+        return std::clamp(720.0F / static_cast<float>(outputHeight), kMinimumUpscalerRenderScale, requested);
+    return requested;
 }
 
 [[nodiscard]] inline RenderExtent ScaleRenderExtent(

@@ -863,7 +863,9 @@ bool GfxRenderingAPIVulkan::RestorePicaColorTargets(
         const auto restoreSettings =
             Extension::GraphicsSettingsRuntime::Instance().SnapshotForRendering().Value;
         const float settingsScale = Extension::ResolveInternalResolutionScale(
-            restoreSettings, UpscalerProviderAvailable(restoreSettings.Upscaler));
+            restoreSettings, UpscalerProviderAvailable(restoreSettings.Upscaler),
+            Extension::ResolvePresentationPicture(mSwapchainExtent.width, mSwapchainExtent.height,
+                                                  restoreSettings.Aspect).Height);
         float restoreScale = mInternalResolutionScale;
         if (guestExtent) {
             restoreScale = settingsScale;

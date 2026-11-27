@@ -202,10 +202,12 @@ GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
         value = EnhancedPresetSettings();
         value.Preset = preset;
         value.FrameRate = FrameRateMode::Interpolated2x;
-        value.InternalResolutionScale = 1.0F;
+        value.InternalResolutionScale = 0.8F;
         value.AntiAliasing = AntiAliasingMode::Smaa1x;
+        value.SgsrEdgeDir = true;
         value.MsaaSamples = 1;
-        value.Anisotropy = 4;
+        value.Anisotropy = 8;
+        value.TextureMipLimit = 4;
         value.FovMultiplier = 1.10F;
         value.ExtendedDrawDistance = true;
         value.Grass.MaxInstancesPerRoom = value.Grass.MaxInstancesPerRoom / 5U * 4U;
@@ -293,6 +295,7 @@ void ResetDisplaySettings(GraphicsSettings& settings) {
         settings.Preset = GraphicsPreset::Custom;
     }
     settings.InternalResolutionScale = safe.InternalResolutionScale;
+    settings.SgsrEdgeDir = safe.SgsrEdgeDir;
     settings.AntiAliasing = safe.AntiAliasing;
     settings.MsaaSamples = safe.MsaaSamples;
     settings.Upscaler = safe.Upscaler;
@@ -919,7 +922,8 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
     }
     if (value.AntiAliasing == AntiAliasingMode::Smaa1x &&
         !capabilities.Has(GraphicsCapability::Smaa1x)) {
-        value.AntiAliasing = AntiAliasingMode::Off;
+        value.AntiAliasing = value.Preset == GraphicsPreset::EnhancedForMobile
+            ? AntiAliasingMode::Fxaa : AntiAliasingMode::Off;
         Correct(result.Issues, "Graphics.AA.Mode",
                 "SMAA 1x requires the three-stage NRI compute pipeline");
     }
@@ -1050,6 +1054,8 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         auto grassMasks = std::move(value.Grass.Masks);
         auto reflectionMaterials = std::move(value.Effects.ReflectionMaterials);
         value.InternalResolutionScale = 1.0F;
+        value.SgsrEdgeDir = false;
+        value.TextureMipLimit = 0;
         value.AntiAliasing = AntiAliasingMode::Off;
         value.MsaaSamples = 1;
         value.FrameRate = FrameRateMode::Original30;

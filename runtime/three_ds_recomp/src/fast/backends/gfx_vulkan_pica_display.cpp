@@ -3375,7 +3375,7 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             // native target already is the composed scene.
             const bool applyBoundaryFxaa = fxaaBeforeUi && beforeNativeUi && worldSurface &&
                 !display.PresentationFxaaExcluded && mSpatialAaMode == 1U;
-            const bool composedScene = applyBoundaryFxaa ||
+            const bool composedScene = applyBoundaryFxaa || outputResolutionUi || smaaForDisplay ||
                 effectPlan.SceneOutput != Extension::EffectResource::SceneColor;
             const auto compositionPass = effectPlan.FindPass(
                 Extension::DisplayEffectPass::SceneComposition);
@@ -3492,8 +3492,18 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             Extension::PicaScanoutPolicyInput compositionPolicy{};
             compositionPolicy.TransferFlags = 0U;
             compositionPolicy.AaMode = applyBoundaryFxaa ? 1U : 0U;
-            compositionPolicy.Width = compositionWidth;
-            compositionPolicy.Height = compositionHeight;
+            compositionPolicy.Width = compositionSource->Width;
+            compositionPolicy.Height = compositionSource->Height;
+            const bool sgsrSourceSupported = composedFormat == VK_FORMAT_R8G8B8A8_UNORM ||
+                (composedFormat == VK_FORMAT_R16G16B16A16_SFLOAT && mSgsrFloatSourceSupported);
+            const bool sgsr = outputResolutionUi && mPresentationSgsrEdgeDir && sgsrSourceSupported &&
+                compositionWidth >= compositionSource->Width && compositionHeight >= compositionSource->Height &&
+                (compositionWidth > compositionSource->Width || compositionHeight > compositionSource->Height) &&
+                mNriPicaScanoutPass.ConfigureOffscreen(VK_FORMAT_R8G8B8A8_UNORM, true);
+            if (sgsr) {
+                compositionPolicy.AaMode = applyBoundaryFxaa ? Extension::kPicaScanoutFxaaSgsrEdgeDir
+                                                            : Extension::kPicaScanoutSgsrEdgeDir;
+            }
             compositionPolicy.EffectsComposited = true;
             compositionPolicy.InputEncoding =
                 compositionSource->ColorEncoding;
@@ -3512,8 +3522,7 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
                 mCurrentFrame, Extension::GpuProfileScope::SceneComposite,
                 command);
             const bool nriComposition =
-                mNriPicaScanoutPass.ConfigureOffscreen(
-                    VK_FORMAT_R8G8B8A8_UNORM) &&
+                (sgsr || mNriPicaScanoutPass.ConfigureOffscreen(VK_FORMAT_R8G8B8A8_UNORM)) &&
                 mNriPicaScanoutPass.Execute(
                     {
                         .FrameSlot = mCurrentFrame,
@@ -3570,6 +3579,14 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             copyOutput->SceneEffectsResolved = true;
             if (applyBoundaryFxaa)
                 mDiagnostics.RecordBeforeUiAntiAliasing(true, false);
+            if (sgsr) {
+                static bool logged = false;
+                if (!logged) {
+                    std::fprintf(stderr, "TRIAEVUM_SGSR_EDGEDIR result=active source=%ux%u output=%ux%u\n",
+                                 compositionSource->Width, compositionSource->Height, compositionWidth, compositionHeight);
+                    logged = true;
+                }
+            }
             mDiagnostics.RecordDisplayEffectGraphExecution(
                 effectExecution.Summary());
             restoreEffectPassGuides();

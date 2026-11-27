@@ -1578,6 +1578,7 @@ SerializeGraphicsSettings(const GraphicsSettings& settings) {
              {"Provenance", EnumName(settings.OutputProvenance, kOutputProvenanceNames)},
          }},
         {"RenderScale", settings.InternalResolutionScale},
+        {"SgsrEdgeDir", settings.SgsrEdgeDir},
         {"AA",
          {
              {"Mode",
@@ -1608,7 +1609,7 @@ SerializeGraphicsSettings(const GraphicsSettings& settings) {
         {"Camera",
          {{"FovMultiplier", settings.FovMultiplier},
           {"ExtendedDrawDistance", settings.ExtendedDrawDistance}}},
-        {"Textures", {{"Anisotropy", settings.Anisotropy}}},
+        {"Textures", {{"Anisotropy", settings.Anisotropy}, {"MipLimit", settings.TextureMipLimit}}},
         {"TexturePacks",
          {
              {"Azahar",
@@ -1878,6 +1879,10 @@ GraphicsSettingsLoadResult DecodeGraphicsSettings(
     ReadScalar(document, "RenderScale",
                result.Value.InternalResolutionScale,
                "Graphics.RenderScale", result);
+    if (FindMember(document, "SgsrEdgeDir") != nullptr)
+        ReadScalar(document, "SgsrEdgeDir", result.Value.SgsrEdgeDir, "Graphics.SgsrEdgeDir", result);
+    else
+        result.Value.SgsrEdgeDir = false;
     if (const Json* aa =
             RequireObject(document, "AA", "Graphics.AA",
                           result)) {
@@ -1948,8 +1953,13 @@ GraphicsSettingsLoadResult DecodeGraphicsSettings(
     }
     // Optional: a document from before anisotropic filtering takes its
     // preset's value (Enhanced and Enhanced for Mobile 4x, otherwise off).
+    result.Value.TextureMipLimit = 0;
     if (const Json* textures = FindMember(document, "Textures"); textures != nullptr && textures->is_object()) {
         ReadScalar(*textures, "Anisotropy", result.Value.Anisotropy, "Graphics.Textures.Anisotropy", result);
+        if (FindMember(*textures, "MipLimit") != nullptr) {
+            ReadScalar(*textures, "MipLimit", result.Value.TextureMipLimit, "Graphics.Textures.MipLimit", result);
+            result.Value.TextureMipLimit = std::min<uint8_t>(result.Value.TextureMipLimit, 16U);
+        }
     } else {
         const bool enhanced = result.Value.Preset == GraphicsPreset::Enhanced ||
                               result.Value.Preset == GraphicsPreset::EnhancedForMobile;

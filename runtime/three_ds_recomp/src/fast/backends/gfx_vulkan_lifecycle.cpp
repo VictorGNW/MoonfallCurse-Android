@@ -642,6 +642,17 @@ void GfxRenderingAPIVulkan::Init() {
         SPDLOG_INFO("OOT3D Vulkan NRI PICA scanout unavailable: {}",
                     mNriPicaScanoutPass.UnavailableReason());
     }
+#if defined(__ANDROID__)
+    const auto canFilter = [this](VkFormat format) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(mPhysicalDevice, format, &properties);
+        return (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0U;
+    };
+    mSgsrEdgeDirSupported = mNriPicaScanoutPass.Available() && mNriPicaDisplayCopyPass.Available() &&
+        canFilter(VK_FORMAT_R8G8B8A8_UNORM);
+    mSgsrFloatSourceSupported = canFilter(VK_FORMAT_R16G16B16A16_SFLOAT);
+    settingsRuntime.SetCapability(Extension::GraphicsCapability::SgsrEdgeDir, mSgsrEdgeDirSupported);
+#endif
     CreateShaderResources();
     bool picaDynamicRenderingEnabled = mDynamicRenderingEnabled;
     if (const char* overrideValue =

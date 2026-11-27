@@ -2055,6 +2055,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     // the texture samplers were last built with (Graphics.Textures.Anisotropy).
     float mMaxSamplerAnisotropy = 1.0F;
     float mTextureAnisotropy = 1.0F;
+    uint8_t mTextureMipLimit = 0;
     VkResolveModeFlagBits mNativePicaDepthResolveMode = VK_RESOLVE_MODE_NONE;
     bool mFrameSubmitted = false;
     std::atomic<bool> mImGuiInitialized{false};
@@ -2216,6 +2217,9 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     // An upscaler is configured: a target's boundary before native UI keeps
     // the scene it completed (SceneBeforeUi) for it.
     bool mPresentationUpscaler = false;
+    bool mPresentationSgsrEdgeDir = false;
+    bool mSgsrEdgeDirSupported = false;
+    bool mSgsrFloatSourceSupported = false;
     // The native UI overlay of this frame's upscaled display (reused with it).
     bool mNativeUiOverlayExecutedThisFrame = false;
     bool mNativeFidelityProfile = false;

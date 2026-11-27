@@ -84,6 +84,15 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
             changed |= ImGui::SliderFloat("Sharpness", &settings.UpscalerSharpness, 0.0F, 1.0F, "%.2f");
     }
 #endif
+#if defined(__ANDROID__)
+    const bool sgsrAvailable = capabilities.Has(GraphicsCapability::SgsrEdgeDir);
+    ImGui::BeginDisabled(!sgsrAvailable);
+    changed |= ImGui::Checkbox("SGSR v1 (Edge Direction)", &settings.SgsrEdgeDir);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", sgsrAvailable ? "Upscales a reduced 3D scene before the HUD. Set the internal resolution below the output."
+                                             : "SGSR requires the Vulkan scene composition path.");
+#endif
     const char* const anisotropy[] = {"Off", "2x", "4x", "8x", "16x"};
     changed |= SettingsUi::ValidatedCombo<int>(
         "Anisotropic filtering", settings, capabilities, anisotropy,

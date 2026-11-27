@@ -67,3 +67,47 @@ python3 tools/android/prepare_mm3d_data.py \
 ```
 
 The legacy staging directory contains ROM-derived data. Keep it private and use the Forge workflow above for Moonfall Curse.
+
+## Mesa Turnip on compatible Adreno GPUs
+
+The launcher offers **GPU driver** on builds with Turnip support. Choose
+**Import Turnip ZIP** and select an AdrenoTools-compatible package from a
+trusted source. The ZIP must contain one ARM64 driver or a `meta.json` with
+`libraryName` beside the selected library. The game validates Vulkan 1.2 and
+the Mesa Turnip driver identity during its next start. The importer and
+launcher check that the system Vulkan driver sees an Adreno GPU. If Turnip
+fails its probe or the game exits before its first presented frame, the next
+launch uses system Vulkan and records `turnip_unavailable_using_system`.
+Reimporting a ZIP allows another trial. **Use system driver** removes the
+imported driver.
+
+Turnip is optional. Forge continues to prepare pipelines with system Vulkan,
+and gameplay keeps Turnip's device pipeline caches in a separate directory.
+Portable SPIR-V keeps the shared cache. Android builds include driver support
+by default. A fresh system-only native build can disable it with
+`-DTRIAEVUM_ANDROID_TURNIP=OFF`. The release staging step includes the loader
+and its two hook libraries when the runtime links the loader.
+
+For a device comparison, use the same graphics preset and scene with each
+driver. Record time to first frame, frame times for the first and repeated
+runs, and any startup or presentation errors. Include the phone, Android
+version, GPU and Turnip package version.
+
+## Enhanced for Mobile
+
+The revised preset keeps the 2× interpolation option and extended draw
+distance. It selects SMAA 1x with FXAA as a capability fallback, up to 8×
+anisotropy and a four-level sampling limit on the existing mip chain. The
+scene uses 80% of the presentation height up to a 720-line target under the
+existing minimum render-scale limit. The default 720-line Android surface
+therefore renders an internal 576-line scene. Larger output buffers remain
+configurable with `maximum_surface_short_edge` in the Android host config.
+
+SGSR v1 Edge Direction runs inside the Vulkan offscreen scene composition
+at a proven before-HUD boundary. SMAA is resolved before this composition.
+The game uses bilinear scaling when the EdgeDir variant cannot be initialized
+or the scene has no eligible boundary. The HUD at a promoted boundary and
+Android touch controls are drawn after scene upscaling. Vulkan, driver name
+and GPU performance measurements on devices are still required. Existing
+configuration files keep their recorded settings. Reselect **Enhanced for
+Mobile** to apply the updated values.

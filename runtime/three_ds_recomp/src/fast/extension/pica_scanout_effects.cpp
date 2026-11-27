@@ -92,7 +92,8 @@ void main() {
 
 std::string BuildPicaScanoutFragmentShader(bool separateSampler,
                                           std::optional<int> diagnosticMode,
-                                          PicaScanoutOrientation orientation) {
+                                          PicaScanoutOrientation orientation,
+                                          bool includeSgsrEdgeDir) {
     std::string source = R"glsl(
 #version 450
 layout(set = 0, binding = 0) uniform sampler2D physical_scanout;
@@ -210,6 +211,11 @@ vec4 oot3d_compose_at(vec2 uv) {
     return color;
 }
 )glsl";
+    if (includeSgsrEdgeDir) {
+        source +=
+#include "sgsr_edge_direction_glsl.inc"
+            ;
+    }
     source += BuildSpatialAaShaderLibrary();
     source += EffectSurfaceCoordinateShaderLibrary;
     source += PicaGuideDiagnosticShaderLibrary(
@@ -244,7 +250,15 @@ void main() {
     vec4 center = oot3d_compose_at(source_uv);
     if (scanout.aa_mode == 1u) output_color = oot3d_fxaa(source_uv, center);
     else output_color = center;
-    if(scanout.encode_srgb!=0u)
+)glsl";
+    if (includeSgsrEdgeDir) {
+        source += R"glsl(    if (scanout.aa_mode == 3u || scanout.aa_mode == 4u) {
+        if (scanout.aa_mode == 4u) center = oot3d_fxaa(source_uv, center);
+        output_color = sgsr_edge_direction(source_uv, center);
+    }
+)glsl";
+    }
+    source += R"glsl(    if(scanout.encode_srgb!=0u)
         output_color.rgb=oot3d_linear_to_srgb(output_color.rgb);
 }
 )glsl";
@@ -271,7 +285,7 @@ void main() {
                 "uniform " + kind + "texture2D " + std::string(name) + ";";
             source.replace(source.find(combined), combined.size(), texture);
             if (integer) continue;
-            for (const std::string operation : {"texture", "textureSize", "texelFetch"}) {
+            for (const std::string operation : {"texture", "textureSize", "texelFetch", "textureGather"}) {
                 const std::string sample = operation + "(" + name + ",";
                 const std::string separate = operation + "(" + kind + "sampler2D(" + name + ", scanout_sampler),";
                 size_t offset = 0;

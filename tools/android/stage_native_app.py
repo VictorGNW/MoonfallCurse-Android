@@ -33,6 +33,15 @@ def stage(runtime: Path, title: Path, forge: Path, ndk: Path, output: Path) -> N
         "libtriaevum_forge.so": forge,
         "libc++_shared.so": llvm / "sysroot/usr/lib/aarch64-linux-android/libc++_shared.so",
     }
+    def dependencies(path: Path) -> set[str]:
+        dynamic = subprocess.check_output([readelf, "-d", path], text=True)
+        return set(re.findall(r"\(NEEDED\).*\[(.*?)\]", dynamic))
+
+    turnip = ("libtriaevum_vulkan.so", "libmain_hook.so", "libhook_impl.so")
+    runtime_library = source["libTriAevum.so"]
+    if runtime_library.is_file() and turnip[0] in dependencies(runtime_library):
+        turnip_dir = runtime / "turnip-libs"
+        source.update({name: turnip_dir / name for name in turnip})
     for name, path in source.items():
         if not path.is_file():
             raise FileNotFoundError(f"{name}: {path}")
@@ -44,12 +53,14 @@ def stage(runtime: Path, title: Path, forge: Path, ndk: Path, output: Path) -> N
         raise ValueError("Stage outside the input library directories")
     destination = output / "arm64-v8a"
     destination.mkdir(parents=True, exist_ok=True)
+    for name in turnip:
+        if name not in source:
+            (destination / name).unlink(missing_ok=True)
     allowed = set(source) | {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
                              "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so", "libGLESv3.so", "libvulkan.so",
                              "libOpenSLES.so", "libaaudio.so", "libz.so"}
     for name, path in source.items():
-        dynamic = subprocess.check_output([readelf, "-d", path], text=True)
-        needed = set(re.findall(r"\(NEEDED\).*\[(.*?)\]", dynamic))
+        needed = dependencies(path)
         if needed - allowed:
             raise ValueError(f"Unpackaged dependency for {name}: {needed - allowed}")
         target = destination / name

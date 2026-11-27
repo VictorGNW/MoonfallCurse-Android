@@ -456,12 +456,13 @@ void GfxRenderingAPIVulkan::StartFrame() {
     mFrameGraphicsSettings = std::move(graphicsSnapshot.Value);
     mFrameGraphicsSettingsRevision = graphicsSnapshot.Revision;
     const auto& graphicsSettings = mFrameGraphicsSettings;
-    if (const float anisotropy = std::min(static_cast<float>(std::max<uint8_t>(graphicsSettings.Anisotropy, 1U)),
-                                          mMaxSamplerAnisotropy);
-        anisotropy != mTextureAnisotropy) {
+    const float anisotropy = std::min(static_cast<float>(std::max<uint8_t>(graphicsSettings.Anisotropy, 1U)),
+                                      mMaxSamplerAnisotropy);
+    if (anisotropy != mTextureAnisotropy || graphicsSettings.TextureMipLimit != mTextureMipLimit) {
         // Every texture sampler takes the new filtering; the replaced
         // samplers retire after the frames that may still use them.
         mTextureAnisotropy = anisotropy;
+        mTextureMipLimit = graphicsSettings.TextureMipLimit;
         for (auto& [key, texture] : mNativePicaTextures) {
             if (texture.Sampler != VK_NULL_HANDLE) RecreateSampler(texture);
         }
@@ -513,8 +514,15 @@ void GfxRenderingAPIVulkan::StartFrame() {
         graphicsSettings.Preset == Extension::GraphicsPreset::Authentic;
     mTemporalJitterEnabled =
         !mNativeFidelityProfile && aaPolicy.TemporalJitter;
-    mPresentationWorldSurface =
-        !mNativeFidelityProfile && aaPolicy.PresentationWorldSurface;
+    const auto outputPicture = Extension::ResolvePresentationPicture(
+        mSwapchainExtent.width, mSwapchainExtent.height, graphicsSettings.Aspect);
+    const float requestedInternalResolutionScale = Extension::ResolveInternalResolutionScale(
+        graphicsSettings, UpscalerProviderAvailable(graphicsSettings.Upscaler), outputPicture.Height);
+    mPresentationSgsrEdgeDir = !mNativeFidelityProfile && mSgsrEdgeDirSupported &&
+        graphicsSettings.SgsrEdgeDir && !aaPolicy.TemporalJitter && aaPolicy.MsaaSamples == 1U &&
+        !aaPolicy.PresentationUpscaler && requestedInternalResolutionScale < 1.0F;
+    mPresentationWorldSurface = !mNativeFidelityProfile &&
+        (aaPolicy.PresentationWorldSurface || mPresentationSgsrEdgeDir);
     mSceneAntiAliasing = !mNativeFidelityProfile && aaPolicy.SceneAntiAliasing;
     mPresentationUpscaler = !mNativeFidelityProfile && aaPolicy.PresentationUpscaler &&
                             mNativeUiOverlayPass.Available();
@@ -656,9 +664,6 @@ void GfxRenderingAPIVulkan::StartFrame() {
         // longer be eligible for scanout composition as soon as AO is Off.
         mAmbientOcclusionOutputValid = false;
     }
-    const float requestedInternalResolutionScale =
-        Extension::ResolveInternalResolutionScale(
-            graphicsSettings, UpscalerProviderAvailable(graphicsSettings.Upscaler));
     mSpatialAaMode = aaPolicy.SpatialAaMode;
     if (mVsyncEnabled != graphicsSettings.VSync) {
         mVsyncEnabled = graphicsSettings.VSync;

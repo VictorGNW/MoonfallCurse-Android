@@ -50,6 +50,9 @@ struct NriPicaScanoutPass::Impl {
     // never disturbs the swapchain-target scanout state.
     VkFormat OffscreenFormat = VK_FORMAT_UNDEFINED;
     nri::Pipeline* OffscreenPipeline = nullptr;
+    VkFormat SgsrFormat = VK_FORMAT_UNDEFINED;
+    nri::Pipeline* SgsrPipeline = nullptr;
+    bool SgsrFailed = false;
 
     // Creates (or reuses) the pipelines of one declared target role. `overlay`
     // is the presentation-only overlay pipeline slot; the offscreen role passes
@@ -57,7 +60,7 @@ struct NriPicaScanoutPass::Impl {
     // keeps `Reason` set when this device cannot express the role.
     bool ConfigureTarget(VkFormat format, PicaScanoutOrientation orientation,
                          VkFormat& formatSlot, nri::Pipeline*& base,
-                         nri::Pipeline** overlay);
+                         nri::Pipeline** overlay, bool sgsrEdgeDir = false);
     struct FrameDescriptors {
         nri::DescriptorPool* Pool = nullptr;
         std::array<nri::DescriptorSet*, kDrawsPerFrame> Sets{};
@@ -181,7 +184,7 @@ bool NriPicaScanoutPass::Initialize(
 #ifdef ENABLE_OOT3D_NRI
 bool NriPicaScanoutPass::Impl::ConfigureTarget(
     VkFormat format, PicaScanoutOrientation orientation,
-    VkFormat& formatSlot, nri::Pipeline*& base, nri::Pipeline** overlay) {
+    VkFormat& formatSlot, nri::Pipeline*& base, nri::Pipeline** overlay, bool sgsrEdgeDir) {
     if (formatSlot != VK_FORMAT_UNDEFINED &&
         !Interop->CompleteRecordedWork())
         return false;
@@ -195,7 +198,7 @@ bool NriPicaScanoutPass::Impl::ConfigureTarget(
             BuildPicaScanoutVertexShader(), Renderer::SpirvStage::Vertex,
             "oot3d_nri_pica_scanout.vert");
         const auto fragment = Compile(Interop->Shaders(),
-            BuildPicaScanoutFragmentShader(true, std::nullopt, orientation),
+            BuildPicaScanoutFragmentShader(true, std::nullopt, orientation, sgsrEdgeDir),
             Renderer::SpirvStage::Fragment, "oot3d_nri_pica_scanout.frag");
         const std::array<nri::ShaderDesc, 2> shaders{{
             {nri::StageBits::VERTEX_SHADER, vertex.data(),
@@ -264,19 +267,30 @@ bool NriPicaScanoutPass::Configure(VkFormat targetFormat) {
 #endif
 }
 
-bool NriPicaScanoutPass::ConfigureOffscreen(VkFormat targetFormat) {
+bool NriPicaScanoutPass::ConfigureOffscreen(VkFormat targetFormat, bool sgsrEdgeDir) {
     if (mImpl->Reason.size() != 0U ||
         targetFormat == VK_FORMAT_UNDEFINED)
         return false;
 #ifndef ENABLE_OOT3D_NRI
+    (void)sgsrEdgeDir;
     return false;
 #else
-    if (mImpl->OffscreenFormat == targetFormat &&
-        mImpl->OffscreenPipeline != nullptr)
+    if (sgsrEdgeDir) {
+        if (mImpl->SgsrFailed) return false;
+        if (mImpl->SgsrFormat == targetFormat && mImpl->SgsrPipeline != nullptr)
+            return true;
+        if (mImpl->ConfigureTarget(targetFormat, PicaScanoutOrientation::Surface,
+                                   mImpl->SgsrFormat, mImpl->SgsrPipeline, nullptr, true))
+            return true;
+        std::fprintf(stderr, "TRIAEVUM_SGSR_EDGEDIR result=fallback reason=%s\n", mImpl->Reason.c_str());
+        mImpl->Reason.clear();
+        mImpl->SgsrFailed = true;
+        return false;
+    }
+    if (mImpl->OffscreenFormat == targetFormat && mImpl->OffscreenPipeline != nullptr)
         return true;
-    return mImpl->ConfigureTarget(
-        targetFormat, PicaScanoutOrientation::Surface,
-        mImpl->OffscreenFormat, mImpl->OffscreenPipeline, nullptr);
+    return mImpl->ConfigureTarget(targetFormat, PicaScanoutOrientation::Surface,
+                                 mImpl->OffscreenFormat, mImpl->OffscreenPipeline, nullptr);
 #endif
 }
 
@@ -291,11 +305,14 @@ bool NriPicaScanoutPass::Execute(
     const auto* outputBarrier = barrierPlan.Find(
         desc.OffscreenTarget ? EffectResource::SceneComposition
                              : EffectResource::PresentationOutput);
-    const VkFormat roleFormat =
-        desc.OffscreenTarget ? mImpl->OffscreenFormat : mImpl->TargetFormat;
-    if (!(desc.OffscreenTarget
-              ? mImpl->OffscreenPipeline != nullptr
-              : PipelineOwnedByNri()) ||
+    const bool sgsr = desc.OffscreenTarget &&
+        (desc.Push.AaMode == kPicaScanoutSgsrEdgeDir || desc.Push.AaMode == kPicaScanoutFxaaSgsrEdgeDir);
+    const VkFormat roleFormat = desc.OffscreenTarget
+        ? (sgsr ? mImpl->SgsrFormat : mImpl->OffscreenFormat) : mImpl->TargetFormat;
+    nri::Pipeline* const pipeline = desc.OffscreenTarget
+        ? (sgsr ? mImpl->SgsrPipeline : mImpl->OffscreenPipeline)
+        : (desc.Overlay ? mImpl->OverlayPipeline : mImpl->BasePipeline);
+    if (pipeline == nullptr ||
         (desc.OffscreenTarget && desc.Overlay) ||
         desc.TargetFormat != roleFormat ||
         desc.CommandBuffer == VK_NULL_HANDLE ||
@@ -396,12 +413,7 @@ bool NriPicaScanoutPass::Execute(
     if (!mImpl->DiagnosticSolid || desc.OffscreenTarget) {
         mImpl->Core->CmdSetPipelineLayout(
             *command, nri::BindPoint::GRAPHICS, *mImpl->PipelineLayout);
-        mImpl->Core->CmdSetPipeline(
-            *command,
-            desc.OffscreenTarget
-                ? *mImpl->OffscreenPipeline
-                : (desc.Overlay ? *mImpl->OverlayPipeline
-                                : *mImpl->BasePipeline));
+        mImpl->Core->CmdSetPipeline(*command, *pipeline);
         const nri::SetDescriptorSetDesc setDesc{
             0, set, nri::BindPoint::GRAPHICS};
         mImpl->Core->CmdSetDescriptorSet(*command, setDesc);
@@ -482,6 +494,8 @@ void NriPicaScanoutPass::Shutdown() {
             mImpl->Core->DestroyPipeline(mImpl->OverlayPipeline);
         if (mImpl->OffscreenPipeline != nullptr)
             mImpl->Core->DestroyPipeline(mImpl->OffscreenPipeline);
+        if (mImpl->SgsrPipeline != nullptr)
+            mImpl->Core->DestroyPipeline(mImpl->SgsrPipeline);
         if (mImpl->Sampler != nullptr)
             mImpl->Core->DestroyDescriptor(mImpl->Sampler);
         if (mImpl->PipelineLayout != nullptr)

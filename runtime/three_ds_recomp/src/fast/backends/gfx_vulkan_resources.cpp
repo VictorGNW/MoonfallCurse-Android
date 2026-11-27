@@ -743,9 +743,11 @@ VkSamplerCreateInfo GfxRenderingAPIVulkan::BuildTextureSamplerInfo(
     samplerInfo.addressModeV = ToVulkanAddressMode(texture.SamplerState.WrapT);
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.mipLodBias = texture.SamplerState.LodBias;
-    const uint32_t highestUploadedMip = texture.UploadedMipLevels > 0
-                                            ? texture.UploadedMipLevels - 1
-                                            : 0;
+    uint32_t highestUploadedMip = texture.UploadedMipLevels > 0 ? texture.UploadedMipLevels - 1 : 0;
+    if (mTextureMipLimit > 0U) {
+        const uint32_t firstMip = std::min(texture.SamplerState.MinMipLevel, highestUploadedMip);
+        highestUploadedMip = std::min(highestUploadedMip, firstMip + mTextureMipLimit - 1U);
+    }
     samplerInfo.minLod = static_cast<float>(
         std::min(texture.SamplerState.MinMipLevel, highestUploadedMip));
     samplerInfo.maxLod = static_cast<float>(
