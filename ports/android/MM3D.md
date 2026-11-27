@@ -30,7 +30,9 @@ adb devices -l
 adb install -r "$MM3D_APK"
 ```
 
-Open **Moonfall Curse**, select your own compatible dump and let Forge finish. On a test device, verify first launch, gameplay, saving and reloading, overlay editing, controller input and background/resume. The Android release guide tracks the remaining qualification checks.
+Open **Moonfall Curse** and select your own compatible dump. The installer can prepare known shaders and Vulkan pipelines before you play. This option starts enabled and makes installation take longer, uses extra cache space and may warm up the phone. Turn it off to skip the optional device-pipeline warmup; Forge still prepares the required game data and portable shader pack.
+
+On a test device, verify first launch, gameplay, saving and reloading, overlay editing, controller input and background/resume. The Android release guide tracks the remaining qualification checks.
 
 If startup fails, collect the app's diagnostics or read the native logs:
 
@@ -65,3 +67,54 @@ python3 tools/android/prepare_mm3d_data.py \
 ```
 
 The legacy staging directory contains ROM-derived data. Keep it private and use the Forge workflow above for Moonfall Curse.
+
+## Mesa Turnip on compatible Adreno GPUs
+
+The launcher offers **GPU driver**. The default **Auto** setting tries the
+bundled Mesa Turnip 26.3.0 on a Qualcomm Adreno 600-series GPU reported by the
+system Vulkan driver. Auto uses system Vulkan on other GPUs. Choose
+**Use system driver** to turn off Turnip or **Import Turnip ZIP** to use your
+own AdrenoTools-compatible package. Previously installed imports keep their
+selection. Switching between modes keeps the imported package available.
+
+An import must contain a single ARM64 driver or a `meta.json` with
+`libraryName` beside the selected library. Both Turnip choices require an
+Android Vulkan 1.2+ driver with surface and swapchain support. If a choice
+fails its probe or the previous launch stops before presenting a frame, the
+game uses system Vulkan on the next launch. Reselect the driver to retry.
+Forge continues to prepare pipelines using system Vulkan. Driver-specific
+pipeline caches are isolated and portable SPIR-V is shared.
+
+The publisher stage downloads the pinned Turnip 26.3.0 ZIP and verifies its
+SHA-256 before staging the library. For offline staging, set
+`TRIAEVUM_ANDROID_TURNIP_ARCHIVE` to the same ZIP. Native builds configured
+with `-DTRIAEVUM_ANDROID_TURNIP=OFF` omit the loader and driver.
+
+The Android graphics menu offers Off, FXAA and SMAA. Old MSAA and TAA
+selections become FXAA. The texture filtering toggle selects up to 8×
+anisotropy and four existing mip levels when enabled. SGSR remains a separate
+upscaling option.
+
+For a device comparison, use the same graphics preset and scene with each
+driver. Record time to first frame, frame times for the first and repeated
+runs, and any startup or presentation errors. Include the phone, Android
+version, GPU and Turnip package version.
+
+## Enhanced for Mobile
+
+The revised preset keeps the 2× interpolation option and extended draw
+distance. It selects SMAA 1x with FXAA as a capability fallback, up to 8×
+anisotropy and a four-level sampling limit on the existing mip chain. The
+scene uses 80% of the presentation height up to a 720-line target under the
+existing minimum render-scale limit. The default 720-line Android surface
+therefore renders an internal 576-line scene. Larger output buffers remain
+configurable with `maximum_surface_short_edge` in the Android host config.
+
+SGSR v1 Edge Direction runs inside the Vulkan offscreen scene composition
+at a proven before-HUD boundary. SMAA is resolved before this composition.
+The game uses bilinear scaling when the EdgeDir variant cannot be initialized
+or the scene has no eligible boundary. The HUD at a promoted boundary and
+Android touch controls are drawn after scene upscaling. Vulkan, driver name
+and GPU performance measurements on devices are still required. Existing
+configuration files keep their recorded settings. Reselect **Enhanced for
+Mobile** to apply the updated values.

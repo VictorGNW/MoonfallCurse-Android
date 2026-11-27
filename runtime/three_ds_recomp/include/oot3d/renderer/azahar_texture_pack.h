@@ -77,6 +77,8 @@ struct AzaharTextureReplacement {
     // without levels it shimmers and its cut-out edges (grass) break up
     // (issue #122). MipLevels counts the base level; 1 means none.
     std::shared_ptr<const std::vector<uint8_t>> MipsRgba8;
+    bool BcnSource = false;
+    bool Srgb = false;
     uint32_t MipLevels = 1;
     std::filesystem::path SourcePath;
 };

@@ -75,7 +75,7 @@ class InputOverlayDrawableJoystick(
         bounds = rectOuter
         defaultStateInnerBitmap.bounds = rectInner
         pressedStateInnerBitmap.bounds = rectInner
-        virtBounds = bounds
+        virtBounds = Rect(bounds)
         origBounds = outerBitmap.copyBounds()
         boundsBoxBitmap.alpha = 0
         boundsBoxBitmap.bounds = virtBounds
@@ -84,6 +84,12 @@ class InputOverlayDrawableJoystick(
         pressedStateInnerBitmap.alpha = opacity
         outerBitmap.alpha = opacity
     }
+
+    internal val visualBounds: Rect
+        get() = if (pressedState) virtBounds else bounds
+
+    internal val thumbBounds: Rect
+        get() = currentStateBitmapDrawable.bounds
 
     fun draw(canvas: Canvas?) {
         outerBitmap.draw(canvas!!)
@@ -168,7 +174,7 @@ class InputOverlayDrawableJoystick(
                 overlay.hapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             }
 
-            return oldXAxis != this.xAxis || oldYAxis != this.yAxis
+            return isActionDown || oldXAxis != this.xAxis || oldYAxis != this.yAxis
         }
         return false
     }

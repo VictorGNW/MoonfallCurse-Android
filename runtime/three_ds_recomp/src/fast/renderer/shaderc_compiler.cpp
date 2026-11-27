@@ -8,6 +8,10 @@
 #endif
 #include <shaderc/shaderc.hpp>
 
+#if defined(__ANDROID__) && __has_include("android_shaderc_fingerprint.h")
+#include "android_shaderc_fingerprint.h"
+#endif
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -35,6 +39,7 @@
 
 namespace Fast::Renderer {
 namespace {
+#ifndef TRIAEVUM_ANDROID_SHADERC_FINGERPRINT
 bool ShaderTool(const std::filesystem::path& path) {
     const auto utf8 = path.filename().u8string();
     std::string name(utf8.begin(), utf8.end());
@@ -120,6 +125,13 @@ std::string IdentifyCompiler() {
     for (const auto& fingerprint : fingerprints) contract += "/" + fingerprint;
     return contract;
 }
+#else
+std::string IdentifyCompiler() {
+    // Android links shaderc statically. A game-only rebuild does not change the
+    // compiler or invalidate SPIR-V compiled from the same source and options.
+    return "shaderc/vulkan1.1/performance/main/v1/android/" TRIAEVUM_ANDROID_SHADERC_FINGERPRINT;
+}
+#endif
 }
 
 namespace {

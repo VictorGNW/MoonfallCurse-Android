@@ -215,8 +215,7 @@ bool NativeA32WindowSession::RunFrame() {
   if (!windowFrameReady) {
     return true;
   }
-  // Main-thread work of this presentation, reported to the performance hint
-  // session without the admission wait and any input sample delay.
+  // Report elapsed work without the waits explicitly inserted by the port.
   const auto mainWorkStart = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration mainWorkIdle{};
   // The SDL events just pumped are the physical input this frame polls.
@@ -275,6 +274,18 @@ bool NativeA32WindowSession::RunFrame() {
               !hostArgs.ThroughputBenchmark
           ? 1000000U / presentationPacingPolicy.TargetRateHz
           : 0U;
+#if defined(__ANDROID__)
+  static const bool frameRateHintEnabled = [] {
+    const char* value = std::getenv("TRIAEVUM_ANDROID_FRAME_RATE_HINT");
+    return value == nullptr || std::string_view(value) != "0";
+  }();
+  const uint32_t surfaceRate = frameRateHintEnabled && presentationPeriodMicroseconds != 0U
+      ? presentationPacingPolicy.TargetRateHz : 0U;
+  if (androidPresentationRate != surfaceRate) {
+    androidPresentationRate = surfaceRate;
+    SetAndroidPresentationRate(surfaceRate);
+  }
+#endif
   inputSampleDelay.Configure(presentationPeriodMicroseconds);
   if (presentationPeriodMicroseconds != 0U) {
     const std::chrono::nanoseconds period(
@@ -287,9 +298,11 @@ bool NativeA32WindowSession::RunFrame() {
     mainPerformanceHint.UpdateTarget(period);
   }
   const auto presentationTime = std::chrono::steady_clock::now();
+#if !defined(__ANDROID__)
   renderStream.Submit([&, presentationTime] {
     realtimePacer.ObservePresentation(presentationTime);
   });
+#endif
   const double presentationElapsedSeconds =
       hostArgs.FixedDeltaSeconds > 0.0
           ? hostArgs.FixedDeltaSeconds
@@ -470,6 +483,9 @@ bool NativeA32WindowSession::RunFrame() {
       const auto beginStart = std::chrono::steady_clock::now();
       api.StartFrame();
       workerFrameAcquireEnd = std::chrono::steady_clock::now();
+#if defined(__ANDROID__)
+      renderFrameBeganOnWorker = !renderStream.InSynchronousCommand();
+#endif
       rendererStartFrameNanoseconds.fetch_add(
           static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
               workerFrameAcquireEnd - beginStart).count()),
@@ -524,8 +540,9 @@ bool NativeA32WindowSession::RunFrame() {
     if (synchronousFrameBegin) {
       const uint64_t drainBefore = renderStream.Waits().DrainNanoseconds;
       renderStream.Run(beginRendererFrame);
-      frameStartDrainSeconds +=
-          static_cast<double>(renderStream.Waits().DrainNanoseconds - drainBefore) * 1.0e-9;
+      const auto drained = renderStream.Waits().DrainNanoseconds - drainBefore;
+      frameStartDrainSeconds += static_cast<double>(drained) * 1.0e-9;
+      mainWorkIdle += std::chrono::nanoseconds(drained);
       ++synchronousFrameStarts;
       // The renderer is idle after Run: its frame state is readable.
       rendererFrameActive = !rendererFrameSkipped;
@@ -601,9 +618,9 @@ bool NativeA32WindowSession::RunFrame() {
     if (delayMicroseconds != 0U) {
       const auto sleepStart = std::chrono::steady_clock::now();
       std::this_thread::sleep_for(std::chrono::microseconds(delayMicroseconds));
+      mainWorkIdle += std::chrono::steady_clock::now() - sleepStart;
       window.HandleEvents();
       inputPumpTime = std::chrono::steady_clock::now();
-      mainWorkIdle += inputPumpTime - sleepStart;
     }
   }
   const auto inputPhaseStart = std::chrono::steady_clock::now();
@@ -707,6 +724,9 @@ bool NativeA32WindowSession::RunFrame() {
     inGameMenu.Update(menuInput, imGuiOwnsInput, presentationElapsedSeconds);
   }
 #endif
+#if defined(__ANDROID__)
+  ThreeDsRecomp::Input::OverlayTouchSettings().SetMenuOpen(inGameMenu.IsOpen());
+#endif
   if (nativeControlPollingState.ScriptedMenu.PressesApplied != 0U && inGameMenu.IsOpen()) ++nativeControlPollingState.ScriptedMenu.OpenFrames;
   // The first-play help card, once per installation, when the game is first
   // shown (after the preparation screen) and no other host surface is up.
@@ -781,6 +801,15 @@ bool NativeA32WindowSession::RunFrame() {
       RunGuestRefresh();
     }
     if (presentHostFrame) {
+#if defined(__ANDROID__)
+      const bool menuBackdrop = inGameMenu.IsOpen() || widescreenProjection.TopScreenPausePageRedrawActive;
+      if (titleRenderBackend != nullptr && menuBackdrop != androidMenuBackdropVisible) {
+        androidMenuBackdropVisible = menuBackdrop;
+        renderStream.Submit([backend = titleRenderBackend, menuBackdrop] {
+          backend->SetMenuBackdropVisible(menuBackdrop);
+        });
+      }
+#endif
       PresentVisualFrame(presentationElapsedSeconds, visualInterpolationAlpha);
     }
     frameCount += advanceGuest ? 1U : 0U;
@@ -803,6 +832,10 @@ bool NativeA32WindowSession::RunFrame() {
   const float touchCanvasWidth =
       240.0F * static_cast<float>(windowRegion.Width) / static_cast<float>(windowRegion.Height);
   const auto touchAnchors = ThreeDsRecomp::Input::OverlayTouchAnchors().Snapshot();
+#if defined(__ANDROID__)
+  ThreeDsRecomp::Input::OverlayTouchAnchors().SetZoraTouchArt(
+      titleSession && titleSession->UsesZoraTouchArt(process.Memory()));
+#endif
   const bool drawsTouchControls = launch.UiProfile == Oot3dNativeGame::Oot3dUiProfile::TopScreen &&
                                   activeTopScreenConfig.TouchLayout &&
                                   ThreeDsRecomp::Input::AnyTouchAnchored(touchAnchors);
@@ -998,7 +1031,12 @@ bool NativeA32WindowSession::RunFrame() {
   preparationScreen.Draw(preparationStatus);
   gui->EndDraw();
   presentSteps.Mark("gui_end_draw");
-  renderStream.Submit([&, width, height,
+  const bool measureMainWork = mainPerformanceHint.Active() && presentationPeriodMicroseconds != 0U;
+  const auto backPressureBefore = measureMainWork ? renderStream.Waits().FrameEndBackPressureNanoseconds : 0U;
+  auto* inlinePacingWait = measureMainWork &&
+          renderStream.CurrentMode() == Oot3dNativeGame::NativeRenderCommandStream::Mode::Inline
+      ? &mainWorkIdle : nullptr;
+  renderStream.Submit([&, width, height, inlinePacingWait,
                        presentationSerial = presentationFrameCount,
                        admittedRefreshFrame = frameAdmitted && guestRefreshesDue != 0U,
                        overlappedRefreshFrame = !frameAdmitted && guestRefreshesDue != 0U,
@@ -1016,51 +1054,65 @@ bool NativeA32WindowSession::RunFrame() {
         static_cast<uint32_t>(presentationSerial), screenshotState,
         capturedTemporalSample ? &*capturedTemporalSample : nullptr);
     capturedTemporalSample.reset();
-    const auto waitStart = std::chrono::steady_clock::now();
-    if (realtimePacer.Enabled() && realtimePacer.TargetRateHz() != 0U) {
-      // The render thread's work of this presentation: from the acquired
-      // image to the pacing wait.
-      const std::chrono::nanoseconds period(1000000000LL / realtimePacer.TargetRateHz());
-      if (!workerPerformanceHintTried) {
-        workerPerformanceHintTried = true;
-        (void)workerPerformanceHint.Open(
-            {Oot3dNativeGame::NativePerformanceHintSession::CurrentThreadId()}, period);
+    std::chrono::steady_clock::time_point waitStart, waitEnd;
+    const auto paceFrame = [&] {
+      waitStart = std::chrono::steady_clock::now();
+#if defined(__ANDROID__)
+      // Skip frames acquired synchronously by the main thread.
+      if (renderFrameBeganOnWorker && realtimePacer.Enabled() && realtimePacer.TargetRateHz() != 0U) {
+        const std::chrono::nanoseconds period(1000000000LL / realtimePacer.TargetRateHz());
+        if (!workerPerformanceHintTried) {
+          workerPerformanceHintTried = true;
+          (void)workerPerformanceHint.Open(
+              {Oot3dNativeGame::NativePerformanceHintSession::CurrentThreadId()}, period);
+        }
+        workerPerformanceHint.UpdateTarget(period);
+        workerPerformanceHint.ReportActual(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            waitStart - workerFrameAcquireEnd));
       }
-      workerPerformanceHint.UpdateTarget(period);
-      if (waitStart > workerFrameAcquireEnd) {
-        workerPerformanceHint.ReportActual(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(waitStart - workerFrameAcquireEnd));
+#endif
+      CpuProbe::Scope cpuPacing(CpuProbe::Phase::Pacing);
+      const uint64_t missesBeforeWait = realtimePacer.Stats().DeadlineMisses;
+      realtimePacer.WaitForNextRefresh();
+      if ((admittedRefreshFrame || overlappedRefreshFrame) && realtimePacer.Enabled()) {
+        const bool late = realtimePacer.Stats().DeadlineMisses != missesBeforeWait;
+        auto &lateCounter = admittedRefreshFrame ? admittedRefreshFramesLate
+                                                 : overlappedRefreshFramesLate;
+        auto &pacedCounter = admittedRefreshFrame ? admittedRefreshFramesPaced
+                                                  : overlappedRefreshFramesPaced;
+        if (late) lateCounter.fetch_add(1U, std::memory_order_relaxed);
+        pacedCounter.fetch_add(1U, std::memory_order_release);
       }
-    }
-    CpuProbe::Scope cpuPacing(CpuProbe::Phase::Pacing);
-    const uint64_t missesBeforeWait = realtimePacer.Stats().DeadlineMisses;
-    realtimePacer.WaitForNextRefresh();
-    if ((admittedRefreshFrame || overlappedRefreshFrame) && realtimePacer.Enabled()) {
-      const bool late = realtimePacer.Stats().DeadlineMisses != missesBeforeWait;
-      auto &lateCounter = admittedRefreshFrame ? admittedRefreshFramesLate
-                                               : overlappedRefreshFramesLate;
-      auto &pacedCounter = admittedRefreshFrame ? admittedRefreshFramesPaced
-                                                : overlappedRefreshFramesPaced;
-      if (late) lateCounter.fetch_add(1U, std::memory_order_relaxed);
-      pacedCounter.fetch_add(1U, std::memory_order_release);
-    }
-    cpuPacing.Stop();
-    const auto waitEnd = std::chrono::steady_clock::now();
-    rendererTiming->PacingWaitSeconds +=
-        std::chrono::duration<double>(waitEnd - waitStart).count();
+      cpuPacing.Stop();
+      waitEnd = std::chrono::steady_clock::now();
+      rendererTiming->PacingWaitSeconds +=
+          std::chrono::duration<double>(waitEnd - waitStart).count();
+      if (inlinePacingWait != nullptr) *inlinePacingWait += waitEnd - waitStart;
+    };
+#if defined(__ANDROID__)
+    // Queue GPU work before waiting for the presentation deadline.
+    // The driver can render during the pacing wait.
+    window.EndFrame(paceFrame);
+    realtimePacer.ObservePresentation(std::chrono::steady_clock::now());
+#else
+    paceFrame();
     window.EndFrame();
+#endif
     inputLatencyTrace.ObserveFrameEnd(presentationSerial, waitStart, waitEnd,
                                       std::chrono::steady_clock::now());
   }, true);
+  if (measureMainWork) {
+    mainWorkIdle += std::chrono::nanoseconds(
+        renderStream.Waits().FrameEndBackPressureNanoseconds - backPressureBefore);
+  }
   presentSteps.Mark("render_end_frame");
   picaSemanticTrace.RecordFrameBoundary(
       presentationFrameCount, frameCount, guestRefreshesDue != 0U);
   phaseTiming.PresentSeconds += SecondsSince(phaseStart);
   cpuPresent.Stop();
-  if (mainPerformanceHint.Active()) {
-    const auto mainWork = std::chrono::steady_clock::now() - mainWorkStart - mainWorkIdle;
-    mainPerformanceHint.ReportActual(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(mainWork));
+  if (measureMainWork) {
+    mainPerformanceHint.ReportActual(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - mainWorkStart - mainWorkIdle));
   }
   ++presentationFrameCount;
   ++runFrameCount;

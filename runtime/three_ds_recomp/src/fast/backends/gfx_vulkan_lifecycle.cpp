@@ -299,9 +299,18 @@ void GfxRenderingAPIVulkan::Init() {
         // The title's own cache file (VulkanPipelineCachePath): another
         // title's pipelines are never loaded, nor replaced by this title's.
         const auto nriCachePath = VulkanPipelineCachePath(true);
-        LoadPipelineCacheData(nriCachePath, MakePipelineCacheHeader(properties), data,
-                              kMaximumNriPipelineCacheBytes);
+        LoadTitlePipelineCache(true, MakePipelineCacheHeader(properties), data);
+#if defined(__ANDROID__)
+        const auto cacheImportStart = std::chrono::steady_clock::now();
+#endif
         const bool initialized = mNriPicaPipelineBridge.InitializePipelineCache(data);
+#if defined(__ANDROID__)
+        std::fprintf(stderr, "TRIAEVUM_PIPELINE_CACHE_IMPORT nri=1 input_bytes=%zu accepted_bytes=%llu ok=%u ms=%.1f\n",
+                     data.size(), static_cast<unsigned long long>(
+                         mNriPicaPipelineBridge.PipelineStatistics().InitialCacheBytes), unsigned(initialized),
+                     std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - cacheImportStart).count());
+#endif
         SPDLOG_INFO("NRI PICA pipeline cache: initialized={}, accepted {} bytes", initialized,
                     mNriPicaPipelineBridge.PipelineStatistics().InitialCacheBytes);
         // Pipelines compiled this session reach the disk while it runs, not
@@ -309,9 +318,21 @@ void GfxRenderingAPIVulkan::Init() {
         // the shutdown-only store for comparisons).
         if (const char* flush = std::getenv("TRIAEVUM_NRI_PIPELINE_CACHE_FLUSH");
             initialized && (flush == nullptr || std::string_view(flush) != "0")) {
+            Renderer3ds::PipelineCacheFlushPolicy flushPolicy;
+#if defined(__ANDROID__)
+            // Leave large snapshots to clean shutdown. The driver's size
+            // query lets the periodic worker skip the allocation and copy.
+            flushPolicy.MinimumIntervalSeconds = 60.0;
+            constexpr uint64_t snapshotBudget = Renderer3ds::kMaximumAndroidPeriodicNriSnapshotBytes;
+#else
+            constexpr uint64_t snapshotBudget = kMaximumNriPipelineCacheBytes;
+#endif
             mNriPipelineCacheFlusher.Start(
-                nriCachePath, MakePipelineCacheHeader(properties), kMaximumNriPipelineCacheBytes,
-                [this] { return mNriPicaPipelineBridge.GetPipelineCacheData(); });
+                nriCachePath, MakePipelineCacheHeader(properties), snapshotBudget,
+                [this] {
+                    if (mDeviceLossReported.load()) return std::vector<uint8_t>{};
+                    return mNriPicaPipelineBridge.GetPipelineCacheData(snapshotBudget);
+                }, flushPolicy);
         }
     }
     LoadDlssFeatureRecord();
@@ -621,6 +642,17 @@ void GfxRenderingAPIVulkan::Init() {
         SPDLOG_INFO("OOT3D Vulkan NRI PICA scanout unavailable: {}",
                     mNriPicaScanoutPass.UnavailableReason());
     }
+#if defined(__ANDROID__)
+    const auto canFilter = [this](VkFormat format) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(mPhysicalDevice, format, &properties);
+        return (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0U;
+    };
+    mSgsrEdgeDirSupported = mNriPicaScanoutPass.Available() && mNriPicaDisplayCopyPass.Available() &&
+        canFilter(VK_FORMAT_R8G8B8A8_UNORM);
+    mSgsrFloatSourceSupported = canFilter(VK_FORMAT_R16G16B16A16_SFLOAT);
+    settingsRuntime.SetCapability(Extension::GraphicsCapability::SgsrEdgeDir, mSgsrEdgeDirSupported);
+#endif
     CreateShaderResources();
     bool picaDynamicRenderingEnabled = mDynamicRenderingEnabled;
     if (const char* overrideValue =
@@ -715,7 +747,7 @@ void GfxRenderingAPIVulkan::Shutdown() {
     if (mDevice != VK_NULL_HANDLE) {
         WaitForAllPresents();
         StopPresentWorker();
-        vkDeviceWaitIdle(mDevice);
+        ReportDeviceLoss(vkDeviceWaitIdle(mDevice), "vkDeviceWaitIdle(shutdown)");
         // Preparation still running finishes first: what it creates belongs
         // in the persisted pipeline caches.
         JoinStartupPreparation();
@@ -745,6 +777,9 @@ void GfxRenderingAPIVulkan::Shutdown() {
         mNativeUiOverlayPass.Shutdown();
         mSceneCompositePass.Shutdown();
         mSmaa1xPass.Shutdown();
+#ifdef __ANDROID__
+        DestroyBcnAstcPipeline();
+#endif
         mNriEffectGraphTransientImageArena.Shutdown();
         mTemporalAaPass.Shutdown();
         mInteractiveGrassPass.Shutdown();
@@ -816,6 +851,9 @@ void GfxRenderingAPIVulkan::Shutdown() {
             frame.RetiredUniformBuffers.clear();
             for (auto& buffer : frame.RetiredVertexBuffers) DestroyBuffer(buffer);
             frame.RetiredVertexBuffers.clear();
+#ifdef __ANDROID__
+            ResetBcnAstcFrame(frame, true);
+#endif
         }
         for (auto& [key, shader] : mShaders) {
             if (shader.VertexShader != VK_NULL_HANDLE) {

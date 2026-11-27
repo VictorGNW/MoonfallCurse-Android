@@ -389,6 +389,7 @@ struct GraphicsSettings {
     // screen. Host-owned, like the window and the output size.
     AspectRatioMode Aspect = AspectRatioMode::Wide16x9;
     float InternalResolutionScale = 1.0F;
+    bool SgsrEdgeDir = false;
     AntiAliasingMode AntiAliasing = AntiAliasingMode::Off;
     uint8_t MsaaSamples = 1;
     float TaaHistoryWeight = 0.90F;
@@ -408,6 +409,7 @@ struct GraphicsSettings {
     // (off), 2, 4, 8 or 16 samples, clamped to the device's maximum. Only
     // linearly minified textures use it; 1 leaves every sampler as before.
     uint8_t Anisotropy = 1;
+    uint8_t TextureMipLimit = 0; // 0 uses the title's full mip range.
     InteractiveGrassSettings Grass;
     InteractiveGrassSettings GrassSavedPreset;
     // Unedited grass rule sets another title removed from this configuration

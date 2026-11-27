@@ -24,11 +24,30 @@ interface Native3dsInputTarget {
 }
 
 class AzaharInputAdapter(private val target: Native3dsInputTarget) : OverlayInputSink {
+    private val heldButtons = mutableMapOf<Int, Int>()
+    private var heldMask = 0
+    var shortcutFor: (Int) -> TouchShortcut = { TouchShortcut.OFF }
+
     override fun button(id: Int, pressed: Boolean): Boolean {
         if (id == AzaharButtonIds.BUTTON_HOME) {
             target.home(pressed)
             return true
         }
+        val mask = if (id in TouchShortcut.slots) shortcutFor(id).hidMask else regularMask(id)
+        if (pressed && mask != 0) heldButtons.putIfAbsent(id, mask)
+        val released = if (pressed) null else heldButtons.remove(id)
+        if (mask == 0 && released == null) return false
+        val nextMask = heldButtons.values.fold(0) { held, button -> held or button }
+        val changed = heldMask xor nextMask
+        val down = changed and nextMask
+        val up = changed and heldMask
+        if (down != 0) target.button(down, true)
+        if (up != 0) target.button(up, false)
+        heldMask = nextMask
+        return true
+    }
+
+    private fun regularMask(id: Int): Int {
         val bit = when (id) {
             AzaharButtonIds.BUTTON_A -> 0
             AzaharButtonIds.BUTTON_B -> 1
@@ -46,10 +65,9 @@ class AzaharInputAdapter(private val target: Native3dsInputTarget) : OverlayInpu
             AzaharButtonIds.BUTTON_GPIO14 -> 13
             AzaharButtonIds.BUTTON_ZL -> 14
             AzaharButtonIds.BUTTON_ZR -> 15
-            else -> return false
+            else -> return 0
         }
-        target.button(1 shl bit, pressed)
-        return true
+        return 1 shl bit
     }
 
     override fun stick(id: Int, x: Float, y: Float): Boolean {
@@ -72,7 +90,11 @@ class AzaharInputAdapter(private val target: Native3dsInputTarget) : OverlayInpu
     override fun touchMoved(x: Float, y: Float) = target.moveTouchPixels(x, y)
     override fun swapScreens(enabled: Boolean, displayRotation: Int) = target.swapScreens(enabled, displayRotation)
     override fun toggleTurbo(fromOverlay: Boolean) = target.toggleTurbo(fromOverlay)
-    override fun releaseAll() = target.releaseAll()
+    override fun releaseAll() {
+        heldButtons.clear()
+        heldMask = 0
+        target.releaseAll()
+    }
 
     override fun drawsControl(id: Int) = anchorOf(id) >= 0 && target.titleDrawsControls()
 

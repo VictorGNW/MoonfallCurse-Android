@@ -367,7 +367,7 @@ GfxRenderingAPIVulkan::ResolveNativePicaTexture(
                 VkFormat format, uint64_t replacementHash,
                 bool replacement, bool* insertedResult = nullptr,
                 uint64_t replacementPixelHash = 0U,
-                std::span<const uint8_t> lowerLevels = {}) {
+                std::span<const uint8_t> lowerLevels = {}, bool bcnSource = false) {
                 auto [inserted, wasInserted] =
                     mNativePicaTextures.emplace(
                         textureKey, TextureRecord{});
@@ -408,6 +408,12 @@ GfxRenderingAPIVulkan::ResolveNativePicaTexture(
                 record.CustomReplacementPixelHash = replacementPixelHash;
                 record.CustomReplacementApplied = replacement;
                 record.CustomReplacementReady = replacement;
+#ifdef __ANDROID__
+                if (bcnSource && TryUploadBcnAsAstc(record, pixels, lowerLevels, width, height, mipLevels, format))
+                    return &record;
+#else
+                (void)bcnSource;
+#endif
                 CreateNativePicaTextureImage(
                     record, pixels, width, height, mipLevels, format,
                     /*storageView=*/false, lowerLevels);
@@ -518,10 +524,10 @@ GfxRenderingAPIVulkan::ResolveNativePicaTexture(
                         picture.Width,
                         picture.Height,
                         picture.MipsRgba8 != nullptr ? picture.MipLevels : 1U,
-                        VK_FORMAT_R8G8B8A8_UNORM,
+                        picture.Srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
                         resolved.NativeHash, true, &inserted, picture.PixelContentHash,
                         picture.MipsRgba8 != nullptr ? std::span<const uint8_t>(*picture.MipsRgba8)
-                                                     : std::span<const uint8_t>{});
+                                                     : std::span<const uint8_t>{}, picture.BcnSource);
                     if (inserted) {
                         mCustomTextureUploadBytesThisFrame +=
                             replacementBytes;
@@ -699,11 +705,11 @@ GfxRenderingAPIVulkan::ResolveNativePicaTexture(
                         picture.Width,
                         picture.Height,
                         picture.MipsRgba8 != nullptr ? picture.MipLevels : 1U,
-                        VK_FORMAT_R8G8B8A8_UNORM,
+                        picture.Srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
                         replacementResult.NativeHash, true,
                         &inserted, picture.PixelContentHash,
                         picture.MipsRgba8 != nullptr ? std::span<const uint8_t>(*picture.MipsRgba8)
-                                                     : std::span<const uint8_t>{});
+                                                     : std::span<const uint8_t>{}, picture.BcnSource);
                     if (inserted) {
                         mCustomTextureUploadBytesThisFrame +=
                             replacementBytes;

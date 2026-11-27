@@ -377,6 +377,7 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     return row;
   };
 
+  constexpr bool mobile = Fast::Extension::kGraphicsPresetHost == Fast::Extension::GraphicsPresetHost::Mobile;
   tab.Rows.push_back(Heading("Display"));
   {
     Row row;
@@ -384,22 +385,25 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     row.Kind = RowKind::Choice;
     const auto offered = Fast::Extension::BuiltInGraphicsPresets(Fast::Extension::kGraphicsPresetHost);
     const int customChoice = static_cast<int>(offered.size());
-    row.Help = "Authentic keeps the original look. Enhanced adds the modern lighting, shadows and effects. ";
-    if (Fast::Extension::kGraphicsPresetHost == Fast::Extension::GraphicsPresetHost::Mobile)
-      row.Help += "Enhanced for Mobile is Enhanced at 30 fps, with a lower internal resolution, less grass and no "
-                  "water reflections, so the phone stays cool. ";
-    row.Help += "Toon applies the cel-shaded style. Any change below makes the preset Custom; the window, "
-                "resolution, VSync and texture packs stay as they are.";
+    row.Help = mobile
+      ? "Authentic keeps the original look. Enhanced for Mobile uses 2x visual interpolation, SMAA 1x and extended draw distance."
+      : "Authentic keeps the original look. Enhanced adds modern lighting, shadows and effects. Toon applies the cel-shaded style.";
+    row.Help += " Editing preset settings makes the configuration Custom.";
     for (const auto preset : offered) row.Choices.emplace_back(Fast::Extension::GraphicsPresetDisplayName(preset));
-    row.Choices.emplace_back("Custom");
+    if (mobile) {
+      row.ChoiceFallback = "Custom";
+      row.ReapplyChoice = true;
+    } else {
+      row.Choices.emplace_back("Custom");
+      row.ChoiceAvailable = [customChoice](int value) { return value < customChoice; };
+    }
     row.Read = [this] {
       return Fast::Extension::GraphicsPresetChoiceIndex(Fast::Extension::kGraphicsPresetHost, mGraphics.Preset);
     };
     row.Write = [this, offered, customChoice](int value) -> WriteResult {
-      if (value >= customChoice) return {"Custom is the result of changing any setting", false};
+      if (value < 0 || value >= customChoice) return {"Select a built-in graphics preset", true};
       return ApplyGraphics(GraphicsSettingsService::PresetForCurrent(offered[value], mGraphics), true);
     };
-    row.ChoiceAvailable = [customChoice](int value) { return value != customChoice; };
     row.Modified = [this] { return mGraphics.Preset != mBaseline.Preset; };
     tab.Rows.push_back(std::move(row));
   }
@@ -470,9 +474,10 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     Row row;
     row.Key = "Reset display settings";
     row.Kind = RowKind::Action;
-    row.Help = "Back to a window of the default size with native render scale and no anti-aliasing or "
-               "upscaler, as after a failed start. The rest of the settings stay. A window mode change asks "
-               "you to keep it.";
+    row.Help = mobile ? "Restores native render scale and disables anti-aliasing."
+                      : "Back to a window of the default size with native render scale and no anti-aliasing or "
+                        "upscaler, as after a failed start. The rest of the settings stay. A window mode change asks "
+                        "you to keep it.";
     row.Activate = [this]() -> WriteResult {
       const auto validation = Fast::Extension::GraphicsSettingsRuntime::Instance().ResetDisplay();
       RefreshSnapshots();
@@ -498,18 +503,28 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
       settings.InternalResolutionScale = static_cast<float>(value) / 100.0F;
       return ApplyGraphics(settings, false);
     };
-    row.Available = [this] { return mGraphics.AntiAliasing != AntiAliasingMode::Upscaler; };
-    row.UnavailableReason = "The upscaler quality sets the render scale.";
+    if (!mobile) {
+      row.Available = [this] { return mGraphics.AntiAliasing != AntiAliasingMode::Upscaler; };
+      row.UnavailableReason = "The upscaler quality sets the render scale.";
+    }
     row.Modified = [this] { return mGraphics.InternalResolutionScale != mBaseline.InternalResolutionScale; };
     tab.Rows.push_back(std::move(row));
   }
+  std::vector<std::string> aaChoices{"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA"};
+  std::string aaHelp = "FXAA and SMAA smooth edges after rendering, MSAA samples the geometry, "
+                       "and Temporal AA accumulates frames.";
+  if (!mobile) {
+    aaChoices.emplace_back("NRI Upscaler");
+    aaHelp += " NRI Upscaler renders smaller and reconstructs the image.";
+  }
   tab.Rows.push_back(graphicsChoice(
-      "Anti-aliasing", "FXAA and SMAA smooth edges after rendering, MSAA samples the geometry, Temporal AA "
-                       "accumulates frames, and NRI Upscaler renders smaller and reconstructs the image.",
-      {"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA", "NRI Upscaler"},
+      "Anti-aliasing", std::move(aaHelp), std::move(aaChoices),
       [](const auto &s) { return static_cast<int>(s.AntiAliasing); },
-      [](auto &s, int value) { s.AntiAliasing = static_cast<AntiAliasingMode>(value); }));
-  {
+      [](auto &s, int value) {
+        s.AntiAliasing = static_cast<AntiAliasingMode>(value);
+        if (s.AntiAliasing == AntiAliasingMode::Msaa && s.MsaaSamples < 2U) s.MsaaSamples = 2U;
+      }));
+  if (!mobile) {
     auto row = graphicsChoice(
         "Upscaler", "The reconstruction used by NRI Upscaler: NIS and FSR run everywhere, XeSS and DLSS need their GPU.",
         {"NVIDIA Image Scaling (NIS)", "AMD FSR", "Intel XeSS", "NVIDIA DLSS"},
@@ -775,94 +790,6 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
     return row;
   };
 
-  tab.Rows.push_back(Heading("Devices"));
-  tab.Rows.push_back(controlToggle("Keyboard", "The keyboard drives the game.", &NativeControlConfig::KeyboardEnabled));
-  tab.Rows.push_back(controlToggle("Mouse", "The mouse aims and drives its bound buttons.", &NativeControlConfig::MouseEnabled));
-  tab.Rows.push_back(controlToggle("Controller", "The selected game controller drives the game.", &NativeControlConfig::ControllerEnabled));
-  tab.Rows.push_back(controlToggle("Capture mouse", "Hides and locks the pointer while the mouse is used in gameplay.",
-                                   &NativeControlConfig::CaptureMouseInGameplay));
-  {
-    // The same choice as F1 > Controls > Devices > Controller > Rumble (the
-    // controls owner keeps it).
-    Row row;
-    row.Key = "Rumble";
-    row.Kind = RowKind::Choice;
-    row.Help = "The active controller rumbles when Link takes damage or lands hard. The 3DS has no rumble, so it "
-               "is Off unless you choose it; a controller without a rumble motor stays still.";
-    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kRumbleStrengthCount; ++index)
-      row.Choices.emplace_back(ThreeDsRecomp::Input::RumbleStrengthLabel(static_cast<NativeRumbleStrength>(index)));
-    row.Read = [this] { return static_cast<int>(mControls.Rumble); };
-    row.Write = [this](int value) {
-      auto config = mControls;
-      config.Rumble = static_cast<NativeRumbleStrength>(value);
-      return ApplyControls(config);
-    };
-    row.Modified = [this] { return mControls.Rumble != NativeRumbleStrength::Off; };
-    tab.Rows.push_back(std::move(row));
-  }
-  {
-    // The same choice as F1 > Controls > Devices > Button prompts (the
-    // controls owner keeps it).
-    Row row;
-    row.Key = "Button prompts";
-    row.Kind = RowKind::Choice;
-    row.Help = "The buttons this menu and its help show. Automatic follows the device you used last: the pad in "
-               "your hands (Xbox, PlayStation, Nintendo, Steam Deck or generic labels), the keyboard, or touch.";
-    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kButtonPromptsCount; ++index)
-      row.Choices.emplace_back(ThreeDsRecomp::Input::ButtonPromptsLabel(static_cast<NativeButtonPrompts>(index)));
-    row.Read = [this] { return static_cast<int>(mControls.ButtonPrompts); };
-    row.Write = [this](int value) {
-      auto config = mControls;
-      config.ButtonPrompts = static_cast<NativeButtonPrompts>(value);
-      return ApplyControls(config);
-    };
-    row.Modified = [this] { return mControls.ButtonPrompts != NativeButtonPrompts::Automatic; };
-    tab.Rows.push_back(std::move(row));
-  }
-  if (mOwners.NativeButtonOverlay) {
-    Row row;
-    row.Key = "Native button labels";
-    row.Kind = RowKind::Choice;
-    row.Help = "Controller glyphs on the native MM3D HUD and prompts. Original 3DS and touch keep native artwork.";
-    row.Choices = {"Controller", "Original 3DS"};
-    row.Read = [this] { return mControls.NativeButtonLabels ? 0 : 1; };
-    row.Write = [this](int value) {
-      auto config = mControls;
-      config.NativeButtonLabels = value == 0;
-      return ApplyControls(config);
-    };
-    row.Modified = [this] { return !mControls.NativeButtonLabels; };
-    tab.Rows.push_back(std::move(row));
-  }
-  {
-    Row row;
-    row.Key = "Control preset";
-    row.Kind = RowKind::Choice;
-    row.Help = "Applies a complete set of bindings. Custom is what any edited binding becomes; bindings are "
-               "edited in F1 > Controls, which keeps the selected controller and its calibration.";
-    row.Choices = {"Keyboard", "Keyboard + mouse", "Controller", "Custom"};
-    row.Read = [this] { return static_cast<int>(mControls.Profile); };
-    row.Write = [this](int value) -> WriteResult {
-      if (value == static_cast<int>(NativeControlProfile::Custom)) return {"Custom is the result of editing a binding in F1", false};
-      const auto previous = mControls;
-      auto config = NativeControlPreset(static_cast<NativeControlProfile>(value));
-      config.PreferredControllerGuid = previous.PreferredControllerGuid;
-      config.PreferredControllerSerial = previous.PreferredControllerSerial;
-      config.CalibrationControllerGuid = previous.CalibrationControllerGuid;
-      config.CalibrationControllerSerial = previous.CalibrationControllerSerial;
-      config.GyroscopeBiasDegreesPerSecond = previous.GyroscopeBiasDegreesPerSecond;
-      config.AccelerometerNeutral = previous.AccelerometerNeutral;
-      config.ButtonPrompts = previous.ButtonPrompts;
-      config.NativeButtonLabels = previous.NativeButtonLabels;
-      config.Rumble = previous.Rumble;
-      config.QuickPutAway = previous.QuickPutAway;
-      config.RollDash = previous.RollDash;
-      return ApplyControls(config);
-    };
-    row.ChoiceAvailable = [](int value) { return value != static_cast<int>(NativeControlProfile::Custom); };
-    tab.Rows.push_back(std::move(row));
-  }
-
 #if defined(__ANDROID__)
   // The touch overlay owns and saves these; the rows ask it for changes.
   {
@@ -922,7 +849,7 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
       return row;
     };
     tab.Rows.push_back(Heading("Touch controls"));
-    tab.Rows.push_back(overlayToggle("Touch controls", "Shows the on-screen controls over the game.",
+    tab.Rows.push_back(overlayToggle("Touch controls", "Shows the on-screen controls. They hide after 15 seconds without touch and return when you touch the screen.",
                                      &TouchOverlayValues::Visible));
     tab.Rows.push_back(overlayNumber("Opacity", "How opaque the on-screen controls are.",
                                      &TouchOverlayValues::OpacityPercent, 0, 100, 5));
@@ -931,7 +858,7 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
     tab.Rows.push_back(overlayToggle("Vibration", "A short vibration when a control is pressed.",
                                      &TouchOverlayValues::Vibration));
     tab.Rows.push_back(overlayToggle("Hide with a controller",
-                                     "Hides the on-screen controls while a game controller is used; a touch shows them.",
+                                     "Hides the on-screen controls while a game controller is connected.",
                                      &TouchOverlayValues::HideWithController));
     if (mOwners.TopScreen)
       tab.Rows.push_back(topScreenToggle("Game HUD on the controls",
@@ -945,6 +872,100 @@ void InGameMenu::BuildControlsTab(Menu::Document &document) {
                                      [] { OverlayTouchSettings().RequestLayoutReset(); }, "Layout reset"));
   }
 #endif
+
+  tab.Rows.push_back(Heading("Devices"));
+#if !defined(__ANDROID__)
+  tab.Rows.push_back(controlToggle("Keyboard", "The keyboard drives the game.", &NativeControlConfig::KeyboardEnabled));
+#endif
+  tab.Rows.push_back(controlToggle("Mouse", "The mouse aims and drives its bound buttons.", &NativeControlConfig::MouseEnabled));
+  tab.Rows.push_back(controlToggle("Controller", "The selected game controller drives the game.", &NativeControlConfig::ControllerEnabled));
+  tab.Rows.push_back(controlToggle("Capture mouse", "Hides and locks the pointer while the mouse is used in gameplay.",
+                                   &NativeControlConfig::CaptureMouseInGameplay));
+  {
+    // The same choice as F1 > Controls > Devices > Controller > Rumble (the
+    // controls owner keeps it).
+    Row row;
+    row.Key = "Rumble";
+    row.Kind = RowKind::Choice;
+    row.Help = "The active controller rumbles when Link takes damage or lands hard. The 3DS has no rumble, so it "
+               "is Off unless you choose it; a controller without a rumble motor stays still.";
+    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kRumbleStrengthCount; ++index)
+      row.Choices.emplace_back(ThreeDsRecomp::Input::RumbleStrengthLabel(static_cast<NativeRumbleStrength>(index)));
+    row.Read = [this] { return static_cast<int>(mControls.Rumble); };
+    row.Write = [this](int value) {
+      auto config = mControls;
+      config.Rumble = static_cast<NativeRumbleStrength>(value);
+      return ApplyControls(config);
+    };
+    row.Modified = [this] { return mControls.Rumble != NativeRumbleStrength::Off; };
+    tab.Rows.push_back(std::move(row));
+  }
+  {
+    // The same choice as F1 > Controls > Devices > Button prompts (the
+    // controls owner keeps it).
+    Row row;
+    row.Key = "Button prompts";
+    row.Kind = RowKind::Choice;
+    row.Help = "The buttons this menu and its help show. Automatic follows the device you used last: the pad in "
+               "your hands (Xbox, PlayStation, Nintendo, Steam Deck or generic labels), the keyboard, or touch.";
+    for (std::size_t index = 0; index < ThreeDsRecomp::Input::kButtonPromptsCount; ++index)
+      row.Choices.emplace_back(ThreeDsRecomp::Input::ButtonPromptsLabel(static_cast<NativeButtonPrompts>(index)));
+    row.Read = [this] { return static_cast<int>(mControls.ButtonPrompts); };
+    row.Write = [this](int value) {
+      auto config = mControls;
+      config.ButtonPrompts = static_cast<NativeButtonPrompts>(value);
+      return ApplyControls(config);
+    };
+    row.Modified = [this] { return mControls.ButtonPrompts != NativeButtonPrompts::Automatic; };
+    tab.Rows.push_back(std::move(row));
+  }
+  if (mOwners.NativeButtonOverlay) {
+    Row row;
+    row.Key = "Native button labels";
+    row.Kind = RowKind::Choice;
+    row.Help = "Controller glyphs on the native MM3D HUD and prompts. Original 3DS and touch keep native artwork.";
+    row.Choices = {"Controller", "Original 3DS"};
+    row.Read = [this] { return mControls.NativeButtonLabels ? 0 : 1; };
+    row.Write = [this](int value) {
+      auto config = mControls;
+      config.NativeButtonLabels = value == 0;
+      return ApplyControls(config);
+    };
+    row.Modified = [this] { return !mControls.NativeButtonLabels; };
+    tab.Rows.push_back(std::move(row));
+  }
+#if !defined(__ANDROID__)
+  {
+    Row row;
+    row.Key = "Control preset";
+    row.Kind = RowKind::Choice;
+    row.Help = "Applies a complete set of bindings. Custom is what any edited binding becomes; bindings are "
+               "edited in F1 > Controls, which keeps the selected controller and its calibration.";
+    row.Choices = {"Keyboard", "Keyboard + mouse", "Controller", "Custom"};
+    row.Read = [this] { return static_cast<int>(mControls.Profile); };
+    row.Write = [this](int value) -> WriteResult {
+      if (value == static_cast<int>(NativeControlProfile::Custom)) return {"Custom is the result of editing a binding in F1", false};
+      const auto previous = mControls;
+      auto config = NativeControlPreset(static_cast<NativeControlProfile>(value));
+      config.PreferredControllerGuid = previous.PreferredControllerGuid;
+      config.PreferredControllerSerial = previous.PreferredControllerSerial;
+      config.CalibrationControllerGuid = previous.CalibrationControllerGuid;
+      config.CalibrationControllerSerial = previous.CalibrationControllerSerial;
+      config.GyroscopeBiasDegreesPerSecond = previous.GyroscopeBiasDegreesPerSecond;
+      config.AccelerometerNeutral = previous.AccelerometerNeutral;
+      config.ButtonPrompts = previous.ButtonPrompts;
+      config.NativeButtonLabels = previous.NativeButtonLabels;
+      config.Rumble = previous.Rumble;
+      config.QuickPutAway = previous.QuickPutAway;
+      config.RollDash = previous.RollDash;
+      return ApplyControls(config);
+    };
+    row.ChoiceAvailable = [](int value) { return value != static_cast<int>(NativeControlProfile::Custom); };
+    tab.Rows.push_back(std::move(row));
+  }
+#endif
+
+
 
   tab.Rows.push_back(Heading("Aiming"));
   {

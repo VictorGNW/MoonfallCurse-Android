@@ -41,6 +41,8 @@ inline uint8_t RequestedSkyRate() noexcept {
 // rate as dynamic state and every PICA draw sets it).
 inline std::atomic<bool> gDynamic{false};
 inline std::atomic<uint8_t> gSkyRate{kRate2x2};
+inline std::atomic<VkSampleCountFlags> gSamples2x2{0};
+inline std::atomic<VkSampleCountFlags> gSamples4x4{0};
 inline std::atomic<uint8_t> gPolicy{0};
 inline PFN_vkCmdSetFragmentShadingRateKHR gCmdSetRate = nullptr;
 
@@ -50,14 +52,23 @@ inline VkExtent2D Extent(uint8_t rate) noexcept {
     return rate == kRate4x4 ? VkExtent2D{4U, 4U} : rate == kRate2x2 ? VkExtent2D{2U, 2U} : VkExtent2D{1U, 1U};
 }
 
+inline constexpr uint8_t ResolveSkyRate(uint8_t requested, VkSampleCountFlagBits samples,
+                                        VkSampleCountFlags samples2x2, VkSampleCountFlags samples4x4) noexcept {
+    if (requested == kRate4x4 && (samples4x4 & samples) != 0U) return kRate4x4;
+    if (requested != kRate1x1 && (samples2x2 & samples) != 0U) return kRate2x2;
+    return kRate1x1;
+}
+
 // The rate of one draw. Draws writing gl_FragDepth or discarding (alpha test,
 // discard) stay 1x1: a discard would kill the whole coarse fragment.
-inline uint8_t DrawRate(bool atmosphereLayer, bool depthTestOrWrite, bool writesFragDepth, bool discards) noexcept {
+inline uint8_t DrawRate(bool atmosphereLayer, bool depthTestOrWrite, bool writesFragDepth, bool discards,
+                        VkSampleCountFlagBits samples) noexcept {
     if (!Dynamic() || !atmosphereLayer || writesFragDepth || discards) return kRate1x1;
     const auto policy = static_cast<SkyPolicy>(gPolicy.load(std::memory_order_relaxed));
     if (policy == SkyPolicy::Off) return kRate1x1;
     if (policy == SkyPolicy::DepthOffAtmosphere && depthTestOrWrite) return kRate1x1;
-    return gSkyRate.load(std::memory_order_relaxed);
+    return ResolveSkyRate(gSkyRate.load(std::memory_order_relaxed), samples,
+                          gSamples2x2.load(std::memory_order_relaxed), gSamples4x4.load(std::memory_order_relaxed));
 }
 
 inline void CmdSetRate(VkCommandBuffer command, uint8_t rate) noexcept {

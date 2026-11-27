@@ -15,7 +15,7 @@ The developer APK above (`dev` flavor, `org.triaevum.android`) stays a developer
 `eot` and `mc` flavors, one title each, built only by the publisher with
 `tools/android/android_release.py --title <oot3d|mm3d>` (it prints the exact commands; `--run` executes them).
 Signing comes only from the `TRIAEVUM_ANDROID_*` environment variables, and the Forge package is signed with the
-release key. The staged libraries must pass `tools/android/android_elf_checks.py` (16 KiB pages, one NDK, libc++
+release key. Moonfall Curse updates use the same distribution certificate as the first public APK. The staged libraries must pass `tools/android/android_elf_checks.py` (16 KiB pages, one NDK, libc++
 closure), and every APK must pass `tools/triaevum_release/android_release_policy.py audit`. Neither APK includes game
 assets. Flow, signing, audit and qualification: [docs/TRIAEVUM_ANDROID_RELEASE.md](../../docs/TRIAEVUM_ANDROID_RELEASE.md).
 
@@ -23,13 +23,16 @@ assets. Flow, signing, audit and qualification: [docs/TRIAEVUM_ANDROID_RELEASE.m
 
 - Retain the existing Vulkan/NRI renderer, native PICA rendering, gameplay and
   shared service interfaces. No Android-specific renderer or new decompilation.
-- Android renders the configured effects like the desktop (2026-10-23). The
-  runtime initializes a missing configuration with the product defaults
-  (`--initialize-config product`): the Enhanced for Mobile preset (Enhanced at
-  30 fps without interpolation, 80% internal scale, 80% of the grass budget, no
-  water reflections), with the picture filling the display (Free aspect, a
-  host-owned default outside the preset) instead of a 16:9 pillarbox. The full
-  Enhanced stays selectable in F1 and the in-game menu.
+- The shared application manifest declares the game category for every APK
+  variant. Android and the device manufacturer control Game Mode availability.
+- New installations use Enhanced for Mobile with native render scale (100%),
+  2x visual interpolation, SMAA 1x, 4x anisotropic filtering, 1.10x scene FOV
+  and extended draw distance. The preset uses 80% of the desktop grass budget
+  and disables screen-space water reflections. SMAA requires renderer support.
+  Authentic and Enhanced for Mobile are the two Android presets in F1 and the
+  in-game menu. Android turns off active upscaling in older configurations.
+  Reapply the preset to load its new defaults. Free aspect remains Android's
+  display default.
   `NativePresentationPolicy` is no longer forced on Android; F2 toggles the
   native mask on every platform.
 - Platform lifecycle, surfaces, input devices, storage and audio-device binding
@@ -73,6 +76,32 @@ Gradle packages the staged libraries unchanged, so the catalog's hashes hold on
 the device. The libraries cannot run on the publisher: the on-device Forge
 checks the runtime/title pair before it installs. The translated and build
 source archives the catalog names are published beside the APK, not inside it.
+
+## BCn texture packs
+
+Forge accepts 2D DDS replacements in BC1, BC2, BC3, unsigned BC4/BC5 and
+BC7, with a maximum extent of 4096×4096. It preserves DDS mip levels and the
+DX10 sRGB flag. If a hash has both a PNG and a DDS in the same pack, Forge's
+renderer continues to prefer the PNG.
+
+On Android's modern Vulkan 1.2+ renderer, DDS color replacements use the
+ASTC 4×4 compute shader from [leegao/bcn_layer shader-v3](https://github.com/leegao/bcn_layer/releases/tag/shader-v3)
+when the device supports compute, ASTC LDR sampling and transfer, FP16 and
+Int8 shader arithmetic. Format support is queried for the selected Vulkan
+driver, including Turnip. The existing texture-pack worker decodes BCn to
+RGBA8 with [bcdec](https://github.com/iOrange/bcdec/tree/80859ed3b7afb1c527a2a99d70c61457bea72d0c),
+and the Vulkan upload records the encode and copy in the current frame.
+Temporary buffers are released after the frame fence. This reduces the
+resident Vulkan image size for these textures. First-use pipeline compilation
+and uploads still have a cost.
+
+The installer's **Disable BCn transcoding if textures look incorrect**
+checkbox applies the next time the game starts. With the checkbox selected,
+with unsupported devices or with an encode setup failure, DDS replacements
+use the existing RGBA8 upload. Vulkan 1.1 never attempts the ASTC pass.
+Native PICA textures, PNGs, and PBR sidecars use their existing upload paths.
+KTX, BC6H and signed BC4/BC5 are outside the supported DDS path. The native log
+reports the capability decision and whether the compute pipeline was created.
 
 ## Linux Build
 
@@ -199,31 +228,3 @@ References: [NDK downloads](https://developer.android.com/ndk/downloads/index.ht
 [16-KiB page support](https://developer.android.com/guide/practices/page-sizes),
 [platform tools](https://developer.android.com/tools/releases/platform-tools),
 [renderer architecture](../../docs/OOT3D_NRI_FIDELITY_EXTENSION_ARCHITECTURE.md).
-
-## Permanent release signing
-
-Before provisioning, check the publisher's existing release keystore and GitHub
-Actions secrets. The public Xclipse Forge test APK uses a separate test app ID.
-
-From a trusted Linux machine with an authenticated GitHub CLI, use
-`bash tools/android/provision_release_signing.sh --reuse EXISTING_KEYSTORE BACKUP.p12`
-from the repository root. If there is no existing production key, replace
-`--reuse EXISTING_KEYSTORE` with `--generate NEW_KEYSTORE.p12` to create an
-RSA-4096 key. Keep both paths outside the checkout. Put the encrypted backup on
-a separate private device or volume and keep its password in your password
-manager. The script verifies recovery of the private key before uploading the
-GitHub Actions secrets. It prints the public certificate SHA-256.
-
-For local publisher builds, export the existing four signing environment
-variables plus `TRIAEVUM_ANDROID_SIGNER_SHA256`, set to the same certificate
-fingerprint as the GitHub repository variable. When using the PKCS12 backup as
-the local keystore, its key password and store password are the same. Gradle
-compares the keystore certificate before running the release tasks. The
-publisher recipe repeats the comparison on the final APK using `apksigner`
-from Android SDK Build Tools. Use `--apksigner /path/to/apksigner` if needed.
-Use `--unsigned-candidate` to explicitly build an unsigned candidate.
-
-The manual **Check Android release signing** GitHub Actions workflow verifies
-that the secrets unlock the private key and match the public fingerprint.
-It does not run Gradle or Forge. Continue to use the existing publisher
-recipe and Forge package signature for release builds.

@@ -456,12 +456,13 @@ void GfxRenderingAPIVulkan::StartFrame() {
     mFrameGraphicsSettings = std::move(graphicsSnapshot.Value);
     mFrameGraphicsSettingsRevision = graphicsSnapshot.Revision;
     const auto& graphicsSettings = mFrameGraphicsSettings;
-    if (const float anisotropy = std::min(static_cast<float>(std::max<uint8_t>(graphicsSettings.Anisotropy, 1U)),
-                                          mMaxSamplerAnisotropy);
-        anisotropy != mTextureAnisotropy) {
+    const float anisotropy = std::min(static_cast<float>(std::max<uint8_t>(graphicsSettings.Anisotropy, 1U)),
+                                      mMaxSamplerAnisotropy);
+    if (anisotropy != mTextureAnisotropy || graphicsSettings.TextureMipLimit != mTextureMipLimit) {
         // Every texture sampler takes the new filtering; the replaced
         // samplers retire after the frames that may still use them.
         mTextureAnisotropy = anisotropy;
+        mTextureMipLimit = graphicsSettings.TextureMipLimit;
         for (auto& [key, texture] : mNativePicaTextures) {
             if (texture.Sampler != VK_NULL_HANDLE) RecreateSampler(texture);
         }
@@ -513,8 +514,15 @@ void GfxRenderingAPIVulkan::StartFrame() {
         graphicsSettings.Preset == Extension::GraphicsPreset::Authentic;
     mTemporalJitterEnabled =
         !mNativeFidelityProfile && aaPolicy.TemporalJitter;
-    mPresentationWorldSurface =
-        !mNativeFidelityProfile && aaPolicy.PresentationWorldSurface;
+    const auto outputPicture = Extension::ResolvePresentationPicture(
+        mSwapchainExtent.width, mSwapchainExtent.height, graphicsSettings.Aspect);
+    const float requestedInternalResolutionScale = Extension::ResolveInternalResolutionScale(
+        graphicsSettings, UpscalerProviderAvailable(graphicsSettings.Upscaler), outputPicture.Height);
+    mPresentationSgsrEdgeDir = !mNativeFidelityProfile && mSgsrEdgeDirSupported &&
+        graphicsSettings.SgsrEdgeDir && !aaPolicy.TemporalJitter && aaPolicy.MsaaSamples == 1U &&
+        !aaPolicy.PresentationUpscaler && requestedInternalResolutionScale < 1.0F;
+    mPresentationWorldSurface = !mNativeFidelityProfile &&
+        (aaPolicy.PresentationWorldSurface || mPresentationSgsrEdgeDir);
     mSceneAntiAliasing = !mNativeFidelityProfile && aaPolicy.SceneAntiAliasing;
     mPresentationUpscaler = !mNativeFidelityProfile && aaPolicy.PresentationUpscaler &&
                             mNativeUiOverlayPass.Available();
@@ -656,12 +664,10 @@ void GfxRenderingAPIVulkan::StartFrame() {
         // longer be eligible for scanout composition as soon as AO is Off.
         mAmbientOcclusionOutputValid = false;
     }
-    const float requestedInternalResolutionScale =
-        Extension::ResolveInternalResolutionScale(
-            graphicsSettings, UpscalerProviderAvailable(graphicsSettings.Upscaler));
     mSpatialAaMode = aaPolicy.SpatialAaMode;
     if (mVsyncEnabled != graphicsSettings.VSync) {
         mVsyncEnabled = graphicsSettings.VSync;
+        std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=vsync\n");
         mSwapchainDirty = true;
     }
     markStart(0);
@@ -684,10 +690,8 @@ void GfxRenderingAPIVulkan::StartFrame() {
     }
 #endif
     if (mPresentSwapchainDirty.exchange(false)) {
+        std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=async_present_out_of_date\n");
         mSwapchainDirty = true;
-    }
-    if (mSwapchainSuboptimal.exchange(false) && !mSwapchainDirty) {
-        mSwapchainDirty = SwapchainSurfaceChanged();
     }
     const auto presentError = static_cast<VkResult>(mPresentError.exchange(VK_SUCCESS));
     if (presentError != VK_SUCCESS) {
@@ -699,6 +703,26 @@ void GfxRenderingAPIVulkan::StartFrame() {
 #endif
         CheckVk(presentError, "asynchronous vkQueuePresentKHR");
     }
+#if defined(__ANDROID__)
+    // Some compositors report SUBOPTIMAL on every present. Rate limit their
+    // capability queries, while real resize events and OUT_OF_DATE bypass it.
+    const bool resized = mAndroidSurfaceResized.exchange(false);
+    if (!mSwapchainDirty && (resized || mSwapchainSuboptimal.load())) {
+        const auto now = std::chrono::steady_clock::now();
+        if (resized || now >= mNextAndroidSurfaceCheck) {
+            mSwapchainSuboptimal.store(false);
+            mNextAndroidSurfaceCheck = now + std::chrono::milliseconds(250);
+            mSwapchainDirty = SwapchainSurfaceChanged();
+            if (mSwapchainDirty)
+                std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=surface_changed\n");
+        }
+    }
+    if (mAndroidSurfaceLost.load()) return;
+#else
+    if (mSwapchainSuboptimal.exchange(false) && !mSwapchainDirty) {
+        mSwapchainDirty = SwapchainSurfaceChanged();
+    }
+#endif
     if (std::abs(requestedInternalResolutionScale -
                  mInternalResolutionScale) > 0.0005F) {
         ApplyInternalResolutionScale(requestedInternalResolutionScale);
@@ -732,6 +756,9 @@ void GfxRenderingAPIVulkan::StartFrame() {
     frame.RetiredUniformBuffers.clear();
     for (auto& buffer : frame.RetiredVertexBuffers) DestroyBuffer(buffer);
     frame.RetiredVertexBuffers.clear();
+#ifdef __ANDROID__
+    ResetBcnAstcFrame(frame, false);
+#endif
     for (auto material = mNativePicaMaterials.begin(); material != mNativePicaMaterials.end();) {
         if (mFrameCounter <= material->second.LastUsedFrame + 240U) {
             ++material;
@@ -764,6 +791,7 @@ void GfxRenderingAPIVulkan::StartFrame() {
                 mNriSwapchain.Acquire(mCurrentFrame, mCurrentImage);
             if (result ==
                 Extension::NriSwapchainOperationResult::OutOfDate) {
+                std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=nri_acquire_out_of_date\n");
                 mSwapchainDirty = true;
                 // Let the host pump window events before retrying acquisition.
                 return;
@@ -791,6 +819,7 @@ void GfxRenderingAPIVulkan::StartFrame() {
             return;
         }
         if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=acquire_out_of_date\n");
             mSwapchainDirty = true;
             return;
         }
@@ -1004,9 +1033,11 @@ void GfxRenderingAPIVulkan::EndFrame() {
     }
     const auto sceneFrameStats = mPicaSceneFrame.Stats();
     if (sceneFrameStats.DrawCount != 0U) ++mTemporalJitterSequence;
-    mScanoutProbe.Record(mCommandBuffers[mCurrentFrame], mSwapchainImages[mCurrentImage],
-                         mSwapchainFormat, mSwapchainExtent, mCurrentFrame, mCurrentImage,
-                         mFrameCounter, mNativePicaPresentedThisFrame);
+    if (mSwapchainCanReadBack) {
+        mScanoutProbe.Record(mCommandBuffers[mCurrentFrame], mSwapchainImages[mCurrentImage],
+                             mSwapchainFormat, mSwapchainExtent, mCurrentFrame, mCurrentImage,
+                             mFrameCounter, mNativePicaPresentedThisFrame);
+    }
     mDiagnostics.RecordPicaSceneFrame(sceneFrameStats);
     mGpuProfiler.EndFrame(mCurrentFrame, mCommandBuffers[mCurrentFrame]);
     mBreadcrumbs.Record(mCommandBuffers[mCurrentFrame], "frame_end");
@@ -1033,6 +1064,7 @@ void GfxRenderingAPIVulkan::FinishRender() {
     } else if (mNriSwapchain.Active()) {
         const auto result = mNriSwapchain.Present(mCurrentImage);
         if (result == Extension::NriSwapchainOperationResult::OutOfDate) {
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=nri_present_out_of_date\n");
             mSwapchainDirty = true;
         } else if (result !=
                    Extension::NriSwapchainOperationResult::Success) {
@@ -1070,6 +1102,7 @@ void GfxRenderingAPIVulkan::FinishRender() {
             present = vkQueuePresentKHR(mPresentQueue, &presentInfo);
         }
         if (present == VK_ERROR_OUT_OF_DATE_KHR) {
+            std::fprintf(stderr, "TRIAEVUM_SWAPCHAIN_DIRTY reason=present_out_of_date\n");
             mSwapchainDirty = true;
         } else if (present == VK_SUBOPTIMAL_KHR) {
             mSwapchainSuboptimal.store(true);

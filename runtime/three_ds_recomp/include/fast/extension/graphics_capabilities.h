@@ -55,11 +55,12 @@ enum class GraphicsCapability : uint8_t {
     HostWindowOutput,
     // The device filters textures anisotropically (samplerAnisotropy).
     AnisotropicFiltering,
+    SgsrEdgeDir,
 };
 
 // Last enumerator, for code that visits every capability.
 inline constexpr GraphicsCapability kLastGraphicsCapability =
-    GraphicsCapability::AnisotropicFiltering;
+    GraphicsCapability::SgsrEdgeDir;
 
 struct GraphicsCapabilityState {
     bool Available = false;

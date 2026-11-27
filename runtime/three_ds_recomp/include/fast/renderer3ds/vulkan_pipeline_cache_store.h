@@ -12,9 +12,10 @@ namespace Fast::Renderer3ds {
 
 inline constexpr uint64_t kMaximumPipelineCacheBytes = 64ULL * 1024ULL * 1024ULL;
 // The NRI PICA cache keeps every library part and linked pipeline the title
-// has created across sessions and outgrows the plain cache (52 MB after a few
-// days of play). Over this, the file is dropped rather than left stale.
+// has created across sessions and outgrows the plain cache. An oversized
+// snapshot leaves the previous compatible file available for the next run.
 inline constexpr uint64_t kMaximumNriPipelineCacheBytes = 512ULL * 1024ULL * 1024ULL;
+inline constexpr uint64_t kMaximumAndroidPeriodicNriSnapshotBytes = 128ULL * 1024ULL * 1024ULL;
 inline constexpr uint32_t kPicaPipelineCacheAbi = 1U;
 inline constexpr char kNriPipelineCacheFilename[] = "nri_pipeline_cache.bin";
 

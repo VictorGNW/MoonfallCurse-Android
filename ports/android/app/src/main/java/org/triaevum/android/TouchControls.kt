@@ -1,16 +1,22 @@
 package org.triaevum.android
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
+import android.hardware.input.InputManager
 import android.os.Handler
 import android.os.Looper
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import org.triaevum.android.controls.AzaharButtonIds
 import org.triaevum.android.controls.AzaharInputAdapter
+import org.triaevum.android.controls.EmulationMenuSettings
 import org.triaevum.android.controls.InputOverlay
+import org.triaevum.android.controls.TouchShortcut
 import org.triaevum.android.controls.Native3dsInputTarget
 
 /** JNI entry points in libTriAevum.so (ports/android/runtime/android_input_bridge.cpp). */
@@ -23,6 +29,7 @@ object NativeInputBridge {
     external fun releaseAll()
     external fun controlBounds(anchor: Int, present: Boolean, left: Float, top: Float, right: Float, bottom: Float)
     external fun titleDrawsControls(): Boolean
+    external fun zoraTouchArt(): Boolean
     external fun reportOverlaySettings(appliedRevision: Int, visible: Boolean, opacity: Int, size: Int,
                                        vibration: Boolean,
                                        hideWithController: Boolean)
@@ -43,11 +50,25 @@ class TouchOverlayInput : Native3dsInputTarget {
     private var activity: Activity? = null
     private var parent: ViewGroup? = null
     private var editBar: View? = null
-    private var hiddenForController = false
+    private var inputManager: InputManager? = null
+    private var controllerConnected = false
+    private var resumed = false
+    private var touching = false
+    private var idle = false
+    private var menuOpen = false
     private var appliedRevision = 0
     private var appliedEdit = 0
     private var appliedReset = 0
     private val handler = Handler(Looper.getMainLooper())
+    private val hideAfterIdle = Runnable {
+        idle = true
+        updateVisibility()
+    }
+    private val controllerListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = checkControllers()
+        override fun onInputDeviceRemoved(deviceId: Int) = checkControllers()
+        override fun onInputDeviceChanged(deviceId: Int) = checkControllers()
+    }
     private val openSettings = Runnable {
         homeLongPressed = true
         NativeInputBridge.requestSettings()
@@ -55,6 +76,7 @@ class TouchOverlayInput : Native3dsInputTarget {
     private var homeHeld = false
     private var homeLongPressed = false
     private var titleDraws = false
+    private var moonfallArt: MoonfallTouchArt? = null
     private val watchTitle = object : Runnable {
         override fun run() {
             val draws = NativeInputBridge.titleDrawsControls()
@@ -62,9 +84,16 @@ class TouchOverlayInput : Native3dsInputTarget {
                 titleDraws = draws
                 overlay?.invalidate()
             }
+            moonfallArt?.let { art ->
+                overlay?.controlArt = if (NativeInputBridge.zoraTouchArt()) art.zora else art.standard
+            }
             applyRequests()
             handler.postDelayed(this, TITLE_POLL_MS)
         }
+    }
+
+    fun createAdapter() = AzaharInputAdapter(this).apply {
+        if (BuildConfig.FLAVOR == "mc") shortcutFor = { id -> EmulationMenuSettings.shortcut(id) }
     }
 
     override fun button(hidMask: Int, pressed: Boolean) = NativeInputBridge.button(hidMask, pressed)
@@ -106,6 +135,12 @@ class TouchOverlayInput : Native3dsInputTarget {
         this.activity = activity
         this.overlay = overlay
         this.parent = parent
+        inputManager = activity.getSystemService(InputManager::class.java)
+        if (BuildConfig.FLAVOR == "mc") {
+            val art = MoonfallTouchArt(activity)
+            moonfallArt = art
+            overlay.controlArt = art.standard
+        }
         reportSettings()
     }
 
@@ -131,6 +166,12 @@ class TouchOverlayInput : Native3dsInputTarget {
         if (requests.size < 8) return
         val view = overlay ?: return
         val preferences = preferences() ?: return
+        val newMenuOpen = requests.getOrElse(8) { 0 } != 0
+        if (menuOpen != newMenuOpen) {
+            menuOpen = newMenuOpen
+            view.setMenuOpen(menuOpen)
+            restartIdleTimer()
+        }
         if (requests[0] != appliedRevision) {
             appliedRevision = requests[0]
             preferences.edit()
@@ -141,6 +182,7 @@ class TouchOverlayInput : Native3dsInputTarget {
                 .putBoolean(HIDE_WITH_CONTROLLER, requests[5] != 0)
                 .apply()
             view.refreshControls()
+            restartIdleTimer()
             reportSettings()
         }
         if (requests[7] != appliedReset) {
@@ -163,7 +205,6 @@ class TouchOverlayInput : Native3dsInputTarget {
         if (editing == (editBar != null)) return
         if (editing) {
             view.cancelTouches()
-            showControls()
             val done = Button(host).apply {
                 text = "Done"
                 setOnClickListener { editLayout(false) }
@@ -179,6 +220,10 @@ class TouchOverlayInput : Native3dsInputTarget {
             val bar = LinearLayout(host).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(reset)
+                addView(Button(host).apply {
+                    text = "Options"
+                    setOnClickListener { showEditorOptions(host, view) }
+                })
                 addView(done)
             }
             layout.addView(bar, ViewGroup.LayoutParams(
@@ -196,34 +241,111 @@ class TouchOverlayInput : Native3dsInputTarget {
             layout.removeView(editBar)
             editBar = null
             view.setIsInEditMode(false)
-            view.refreshControls()
+            if (!menuOpen) view.refreshControls()
         }
+        restartIdleTimer()
         view.invalidate()
     }
 
-    /** A game controller was used: the controls step aside while the user wants that. */
-    fun controllerUsed() {
-        val view = overlay ?: return
-        if (hiddenForController || editBar != null || preferences()?.getBoolean(HIDE_WITH_CONTROLLER, true) != true) return
-        hiddenForController = true
-        view.cancelTouches()
-        view.visibility = View.INVISIBLE
-        // Without anchors the game draws its whole HUD again.
-        controlBoundsCleared()
+    private fun showEditorOptions(host: Activity, view: InputOverlay) {
+        val settings = EmulationMenuSettings
+        val options = mutableListOf(
+            "Analog stick · " + if (settings.joystickRelCenter) "Floating" else "Fixed",
+            "Larger main button touch areas · " + if (settings.expandedMainButtons) "On" else "Off",
+        )
+        if (BuildConfig.FLAVOR == "mc") {
+            TouchShortcut.slots.forEachIndexed { index, id ->
+                options.add("Shortcut ${index + 1} · ${settings.shortcut(id).label}")
+            }
+        }
+        AlertDialog.Builder(host)
+            .setTitle("Touch layout options")
+            .setItems(options.toTypedArray()) { _, index ->
+                when (index) {
+                    0 -> AlertDialog.Builder(host)
+                        .setTitle("Analog stick")
+                        .setSingleChoiceItems(arrayOf("Fixed", "Floating"), if (settings.joystickRelCenter) 1 else 0) { dialog, choice ->
+                            settings.joystickRelCenter = choice == 1
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                    1 -> AlertDialog.Builder(host)
+                        .setTitle("Larger main button touch areas")
+                        .setSingleChoiceItems(arrayOf("Off", "On"), if (settings.expandedMainButtons) 1 else 0) { dialog, choice ->
+                            settings.expandedMainButtons = choice == 1
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                    else -> {
+                        val id = TouchShortcut.FIRST_ID + index - 2
+                        val actions = TouchShortcut.entries
+                        AlertDialog.Builder(host)
+                            .setTitle("Shortcut ${index - 1}")
+                            .setSingleChoiceItems(actions.map { it.label }.toTypedArray(), settings.shortcut(id).ordinal) { dialog, choice ->
+                                settings.setShortcut(id, actions[choice])
+                                view.refreshControls()
+                                dialog.dismiss()
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
-    /** A touch brings hidden controls back. */
-    fun touched() {
-        if (!hiddenForController) return
-        showControls()
+    private fun checkControllers() {
+        val manager = inputManager ?: return
+        val connected = manager.inputDeviceIds.any { id ->
+            val device = manager.getInputDevice(id)
+            device != null && !device.isVirtual && (
+                device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                    device.supportsSource(InputDevice.SOURCE_JOYSTICK))
+        }
+        if (controllerConnected == connected) return
+        controllerConnected = connected
+        restartIdleTimer()
     }
 
-    private fun showControls() {
+    /** The activity sees touches even while the overlay view is invisible. */
+    fun onScreenTouch(action: Int) {
+        when (action) {
+            MotionEvent.ACTION_DOWN -> touching = true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touching = false
+            else -> return
+        }
+        restartIdleTimer()
+    }
+
+    private fun hidesForController() =
+        controllerConnected && preferences()?.getBoolean(HIDE_WITH_CONTROLLER, true) == true
+
+    private fun restartIdleTimer() {
+        handler.removeCallbacks(hideAfterIdle)
+        idle = false
+        updateVisibility()
+        if (resumed && !touching && !menuOpen && editBar == null && !hidesForController()) {
+            handler.postDelayed(hideAfterIdle, TOUCH_IDLE_MS)
+        }
+    }
+
+    private fun updateVisibility() {
         val view = overlay ?: return
-        if (!hiddenForController) return
-        hiddenForController = false
-        view.visibility = View.VISIBLE
-        view.refreshControls()
+        val visible = menuOpen || editBar != null ||
+            (preferences()?.getBoolean(SHOW_OVERLAY, true) == true && !idle && !hidesForController())
+        val visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        if (view.visibility == visibility) return
+        view.visibility = visibility
+        if (visible) {
+            view.refreshControls()
+        } else {
+            view.cancelTouches()
+            // Without anchors the game draws its whole HUD again.
+            controlBoundsCleared()
+        }
     }
 
     private fun controlBoundsCleared() {
@@ -233,11 +355,22 @@ class TouchOverlayInput : Native3dsInputTarget {
 
     /** Follows whether the game draws its controls while the activity is in front. */
     fun resume() {
-        handler.removeCallbacks(watchTitle)
+        if (resumed) return
+        resumed = true
+        inputManager?.registerInputDeviceListener(controllerListener, handler)
+        checkControllers()
+        restartIdleTimer()
         handler.post(watchTitle)
     }
 
-    fun pause() = handler.removeCallbacks(watchTitle)
+    fun pause() {
+        if (!resumed) return
+        resumed = false
+        touching = false
+        handler.removeCallbacks(watchTitle)
+        handler.removeCallbacks(hideAfterIdle)
+        inputManager?.unregisterInputDeviceListener(controllerListener)
+    }
 
     companion object {
         private const val LONG_PRESS_MS = 600L
@@ -248,11 +381,11 @@ class TouchOverlayInput : Native3dsInputTarget {
         private const val HIDE_WITH_CONTROLLER = "TriAevumHideWithController"
         // The game reports per frame; the overlay follows within this delay.
         private const val TITLE_POLL_MS = 150L
+        private const val TOUCH_IDLE_MS = 15_000L
 
         /**
          * First run of each layout version: the controls OoT3D uses that the donor hides by default
-         * (ZL/ZR, HOME as the menu key), no C-stick (a finger dragging on the game moves the
-         * camera), SELECT/HOME at the top centre and START above A. Later changes are the user's.
+         * (ZL/ZR, HOME as the menu key), plus a C-stick for Moonfall Curse. Later changes are the user's.
          * Runs after the overlay wrote its own defaults; refresh the overlay afterwards.
          */
         fun seedDefaults(activity: Activity) {
@@ -282,6 +415,7 @@ class TouchOverlayInput : Native3dsInputTarget {
             val short = minOf(metrics.widthPixels, metrics.heightPixels).toFloat()
             val longPixels = maxOf(metrics.widthPixels, metrics.heightPixels)
             val aspect = longPixels / short
+            InputOverlay.setLayoutReference(editor, "", longPixels.toFloat(), short)
             fun pixelSize(base: Float, size: Float): Int {
                 val percent = Math.round(size / base * 100f - 50f)
                 return (short * (base * (percent + 50f) / 100f)).toInt()
@@ -291,6 +425,33 @@ class TouchOverlayInput : Native3dsInputTarget {
                 editor.putInt("controlScale-$scaleId", Math.round(size / base * 100f - 50f))
                 editor.putFloat("$id-X", (centerX - size * 0.5f) * short)
                 editor.putFloat("$id-Y", (centerY - size * 0.5f) * short)
+            }
+            if (BuildConfig.FLAVOR == "mc") {
+                editor.putBoolean("buttonToggle12", true)
+                val growth = 1.10f
+                // Reference positions are distances from the nearest side, or
+                // from the centre for Start/Select, in units of the short edge.
+                fun put(id: Int, base: Float, size: Float, x: Float, y: Float, scaleId: Int = id) {
+                    place(id, scaleId, base, size * growth, x, y)
+                }
+                val center = aspect * 0.5f
+                put(AzaharButtonIds.TRIGGER_L, 0.18f, 0.19f, 0.205f, 0.163f)
+                put(AzaharButtonIds.BUTTON_ZL, 0.18f, 0.19f, 0.200f, 0.278f)
+                put(AzaharButtonIds.STICK_LEFT, 0.275f, 0.33f, 0.230f, 0.531f)
+                put(AzaharButtonIds.DPAD_UP, 0.22f, 0.23f, 0.396f, 0.821f, AzaharButtonIds.DPAD)
+
+                put(AzaharButtonIds.BUTTON_HOME, 0.08f, 0.12f, aspect - 0.102f, 0.106f)
+                put(AzaharButtonIds.BUTTON_ZR, 0.18f, 0.19f, aspect - 0.380f, 0.143f)
+                put(AzaharButtonIds.TRIGGER_R, 0.18f, 0.225f, aspect - 0.200f, 0.318f)
+                put(AzaharButtonIds.STICK_C, 0.1375f, 0.195f, aspect - 0.555f, 0.500f)
+                put(AzaharButtonIds.BUTTON_X, 0.11f, 0.137f, aspect - 0.295f, 0.586f)
+                put(AzaharButtonIds.BUTTON_Y, 0.11f, 0.137f, aspect - 0.445f, 0.737f)
+                put(AzaharButtonIds.BUTTON_A, 0.11f, 0.137f, aspect - 0.145f, 0.737f)
+                put(AzaharButtonIds.BUTTON_B, 0.11f, 0.137f, aspect - 0.292f, 0.893f)
+
+                put(AzaharButtonIds.BUTTON_SELECT, 0.08f, 0.183f, center - 0.130f, 0.882f)
+                put(AzaharButtonIds.BUTTON_START, 0.08f, 0.183f, center + 0.145f, 0.882f)
+                return editor
             }
             // About 9 mm on S25; keep the square hit boxes separated as well as the discs.
             val face = 0.14f

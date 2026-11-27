@@ -195,7 +195,7 @@ class NriPicaPipelineBridge final {
     bool Initialize(NriPicaInterop& interop,
                     const NriPicaExecutionConfig& config = {});
     bool InitializePipelineCache(std::span<const uint8_t> data = {});
-    [[nodiscard]] std::vector<uint8_t> GetPipelineCacheData() const;
+    [[nodiscard]] std::vector<uint8_t> GetPipelineCacheData(uint64_t maximumBytes = 0) const;
     [[nodiscard]] NriPicaPipelineStatistics PipelineStatistics() const;
     // Uses the live pipeline factory, then releases the pipeline. No draw,
     // framebuffer, upload allocation or fake Vulkan pipeline handle is needed.

@@ -2,7 +2,9 @@
 """Tests of the Android release recipe (android_release.py): nothing is built."""
 from pathlib import Path
 import sys
+import subprocess
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import android_release  # noqa: E402
@@ -51,6 +53,16 @@ class AndroidReleaseRecipeTests(unittest.TestCase):
         partial = dict(environ)
         del partial["TRIAEVUM_ANDROID_KEY_PASS"]
         self.assertIn("-PtriaevumUnsignedReleaseCandidate=true", steps("oot3d", partial)["apk"][0])
+
+    def test_only_the_permanent_apk_certificate_is_accepted(self):
+        expected = "a" * 64
+        line = "Signer #1 certificate SHA-256 digest: "
+        for output in (line + "b" * 64, line + expected + "\n" + line + expected, ""):
+            with self.subTest(output=output):
+                verified = subprocess.CompletedProcess([], 0, stdout=output)
+                with patch("android_release.subprocess.run", return_value=verified):
+                    with self.assertRaisesRegex(ValueError, "exactly one signer"):
+                        android_release.verify_apk("apksigner", Path("moonfall-release.apk"), expected)
 
     def test_negative_bad_inputs(self):
         with self.assertRaises(ValueError):

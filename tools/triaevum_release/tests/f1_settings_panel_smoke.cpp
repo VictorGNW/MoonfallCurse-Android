@@ -2354,27 +2354,34 @@ int main(int argc, char** argv) try {
               runtime.Snapshot().TexturePacks.Azahar.LoadCustomTextures &&
               runtime.Snapshot().TexturePacks.Azahar.LoadDirectory == "pack",
           "Enhanced is not the captured profile or replaced the texture pack");
-    // Only a phone offers Enhanced for Mobile, beside the full Enhanced.
+    // The mobile selector offers only Authentic and Enhanced for Mobile.
     {
         // Opens the selector, reads its list and leaves by choosing `next`.
-        const auto offered = [&](const char* next) {
+        const auto offered = [&](const char* next, bool mobile) {
             Click("Graphics preset");
             Frame();
             const bool listed = std::any_of(items.begin(), items.end(), [](const auto& item) {
                 return item.second.Popup && item.second.Label == "Enhanced for Mobile";
             });
+            if (mobile) {
+                for (const char* hidden : {"Enhanced", "Toon", "Custom"}) {
+                    Check(std::none_of(items.begin(), items.end(), [&](const auto& item) {
+                        return item.second.Popup && item.second.Label == hidden;
+                    }), "a desktop preset was offered on mobile");
+                }
+            }
             Click(next);
             return listed;
         };
         const auto before = runtime.Snapshot();
-        Check(!offered("Enhanced"), "a desktop host offered Enhanced for Mobile");
+        Check(!offered("Enhanced", false), "a desktop host offered Enhanced for Mobile");
         panel.SetPresetHost(GraphicsPresetHost::Mobile);
-        Check(offered("Enhanced"), "a mobile host did not offer Enhanced for Mobile");
+        Check(offered("Authentic", true), "a mobile host did not offer Enhanced for Mobile");
         const int savesBefore = store->Stores;
         Select("Graphics preset", "Enhanced for Mobile");
         const auto mobile = runtime.Snapshot();
-        Check(mobile.Preset == GraphicsPreset::EnhancedForMobile && mobile.FrameRate == FrameRateMode::Original30 &&
-                  mobile.InternalResolutionScale == 0.8F && mobile.Grass.MaxInstancesPerRoom == 400000U &&
+        Check(mobile.Preset == GraphicsPreset::EnhancedForMobile && mobile.FrameRate == FrameRateMode::Interpolated2x &&
+                  mobile.InternalResolutionScale == 1.0F && mobile.Grass.MaxInstancesPerRoom == 400000U &&
                   !mobile.Effects.WaterReflections && mobile.Effects.AmbientOcclusion == AmbientOcclusionMode::Mxao &&
                   mobile.TexturePacks.Azahar.LoadDirectory == "pack",
               "Enhanced for Mobile is not the mobile profile or replaced host-owned state");
@@ -2383,18 +2390,12 @@ int main(int argc, char** argv) try {
         Frame(true);
         Check(loggedPanelText.find("Enhanced for Mobile") != std::string::npos,
               "the selector does not show Enhanced for Mobile");
-        // The full Enhanced stays selectable from it, and comes back whole.
-        Select("Graphics preset", "Enhanced");
-        Check(runtime.Snapshot().Preset == GraphicsPreset::Enhanced &&
-                  runtime.Snapshot().FrameRate == FrameRateMode::Interpolated2x &&
-                  runtime.Snapshot().InternalResolutionScale == 1.0F && runtime.Snapshot().Effects.WaterReflections,
-              "Enhanced is not selectable beside Enhanced for Mobile");
         // Editing one of its values through a real widget makes it Custom.
         Select("Graphics preset", "Enhanced for Mobile");
-        Select("Frame rate", "Interpolated 2x (60 FPS)");
+        Select("Frame rate", "Original 30 FPS");
         Check(runtime.Snapshot().Preset == GraphicsPreset::Custom &&
-                  runtime.Snapshot().FrameRate == FrameRateMode::Interpolated2x &&
-                  runtime.Snapshot().InternalResolutionScale == 0.8F,
+                  runtime.Snapshot().FrameRate == FrameRateMode::Original30 &&
+                  runtime.Snapshot().InternalResolutionScale == 1.0F,
               "editing Enhanced for Mobile did not make it Custom");
         Check(store->Root["Graphics"]["Preset"] == "Custom", "the edited preset was not saved as Custom");
         // A desktop keeps the name of a configuration that carries it, without
@@ -2405,7 +2406,7 @@ int main(int argc, char** argv) try {
         Check(runtime.Snapshot().Preset == GraphicsPreset::EnhancedForMobile &&
                   loggedPanelText.find("Enhanced for Mobile") != std::string::npos,
               "a desktop lost the name of Enhanced for Mobile");
-        Check(!offered("Enhanced"), "a desktop offered Enhanced for Mobile while it is active");
+        Check(!offered("Enhanced", false), "a desktop offered Enhanced for Mobile while it is active");
         Check(runtime.Snapshot().Preset == GraphicsPreset::Enhanced, "a desktop could not leave Enhanced for Mobile");
         runtime.Apply(before);
         Frame();

@@ -6,6 +6,7 @@
 #include <map>
 #include <list>
 #include <cstddef>
+#include <functional>
 #include <vector>
 #include <stack>
 #include <string>
@@ -298,7 +299,7 @@ class Interpreter {
     void StartFrame();
     void RunGuiOnly();
     void Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_replacements);
-    void EndFrame();
+    void EndFrame(const std::function<void()>& beforePresent = {});
     void HandleWindowEvents();
     bool IsFrameReady();
     bool ViewportMatchesRendererResolution();

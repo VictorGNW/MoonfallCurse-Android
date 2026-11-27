@@ -535,3 +535,38 @@ Dependencies obtained through CMake, vcpkg or platform SDKs retain their own
 licenses. Release construction must generate a resolved dependency inventory
 and include all required notices. A dependency being downloadable at build
 time does not imply that its binaries may be redistributed.
+
+## Android Vulkan driver support
+
+Android builds with Turnip import support use
+[libadrenotools](https://github.com/bylaws/libadrenotools) at
+`8fae8ce254dfc1344527e05301e43f37dea2df80` and its pinned
+[liblinkernsbypass](https://github.com/bylaws/liblinkernsbypass) submodule
+at `aa3975893d83ef1bc84c321ec60c65fbf1287887`. Both use the
+[BSD 2-Clause license](ports/android/app/src/main/assets/notices/AdrenoTools-BSD-2-Clause.txt), copyright
+2021 Billy Laws. Turnip itself is supplied by the player.
+
+## Snapdragon Game Super Resolution 1 (Edge Direction)
+
+The native PICA scene composition shader adapts Qualcomm Innovation Center,
+Inc.'s BSD-3-Clause [SGSR v1 Edge Direction GLSL shader](https://github.com/SnapdragonGameStudios/snapdragon-gsr/blob/main/sgsr/v1/include/glsl/sgsr1_shader_mobile_edge_direction.frag).
+See [the SGSR license](LICENSES/Snapdragon-GSR-BSD-3-Clause.txt).
+
+## BCn DDS decoding and ASTC encoding
+
+- [bcdec](https://github.com/iOrange/bcdec) by Sergii Kudlai at
+  `80859ed3b7afb1c527a2a99d70c61457bea72d0c` is used under its MIT option
+  to decode blocks from custom DDS packs. The license remains in the
+  vendored header and in the [Android notice](ports/android/app/src/main/assets/notices/Bcdec-MIT.txt).
+- [bcn_layer shader-v3](https://github.com/leegao/bcn_layer/releases/tag/shader-v3)
+  by Lee Gao at `88b682777d6a9cae1f8787edd3cc1a1ebd98527b` provides the
+  MIT-licensed ASTC compute encoder. See the
+  [source and regeneration notes](runtime/three_ds_recomp/src/fast/extension/third_party/bcn_layer/README.md)
+  and the [Android notice](ports/android/app/src/main/assets/notices/BcnLayer-MIT.txt).
+
+## Bundled Mesa Turnip for Android
+
+The Android publisher stage packages [Mesa Turnip 26.3.0](https://archive.mesa3d.org/mesa-26.3.0.tar.xz)
+from the Android KGSL build by [nihui](https://github.com/nihui/mesa-turnip-android-driver/tree/5040c0fa26a19803bbff5cb917bcac6a9740535c).
+The matching source, build patches and Mesa license information are recorded
+in [Android notices](ports/android/app/src/main/assets/notices/Turnip-26.3.0-SOURCE.txt).

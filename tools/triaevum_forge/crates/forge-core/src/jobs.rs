@@ -274,6 +274,7 @@ struct InstallJob {
     data_root: Option<PathBuf>,
     package_root: PathBuf,
     download_hd_textures: bool,
+    prewarm_pipelines: bool,
     android: Option<AndroidJob>,
     game_language: Option<String>,
     hud_layout: crate::publish::HudLayout,
@@ -363,6 +364,15 @@ fn optional_text(request: &Map<String, Value>, key: &str) -> Result<Option<Strin
     }
 }
 
+fn parse_pipeline_prewarm(value: Option<&Value>, android: bool) -> Result<bool> {
+    match value {
+        None => Ok(true),
+        Some(Value::Bool(enabled)) if android => Ok(*enabled),
+        Some(_) if !android => Err(ForgeError::invalid("prewarm_pipelines is an Android install option")),
+        Some(_) => Err(ForgeError::invalid("prewarm_pipelines must be a boolean")),
+    }
+}
+
 impl InstallJob {
     fn parse(request: &Map<String, Value>) -> Result<Self> {
         let source = install_source(request, true)?;
@@ -373,12 +383,14 @@ impl InstallJob {
             Some(_) => return Err(ForgeError::invalid("download_hd_textures must be a boolean")),
         };
         let android = android_job(request)?;
+        let prewarm_pipelines = parse_pipeline_prewarm(request.get("prewarm_pipelines"), android.is_some())?;
         let game_language = optional_text(request, "game_language")?;
         Ok(Self {
             source,
             data_root: optional_path(request, "data_root"),
             package_root,
             download_hd_textures,
+            prewarm_pipelines,
             android,
             game_language,
             hud_layout: crate::publish::HudLayout::parse(request.get("hud_layout"))?,
@@ -418,7 +430,9 @@ impl InstallJob {
                     target: InstallTarget::Android(android.target),
                     game_language: self.game_language,
                 };
-                install::install_private_title_with(request, options, &services, &mut report, cancel)?
+                install::install_private_title_with_prewarm(
+                    request, options, self.prewarm_pipelines, &services, &mut report, cancel,
+                )?
             }
         };
         if let (Some(before), Some(data_root)) = (before, target_data) {
@@ -745,6 +759,16 @@ impl<R: Read> Read for ProgressReader<'_, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_pipeline_prewarm_is_optional_and_defaults_to_enabled() {
+        assert!(parse_pipeline_prewarm(None, true).unwrap());
+        assert!(parse_pipeline_prewarm(None, false).unwrap());
+        assert!(parse_pipeline_prewarm(Some(&json!(true)), true).unwrap());
+        assert!(!parse_pipeline_prewarm(Some(&json!(false)), true).unwrap());
+        assert!(parse_pipeline_prewarm(Some(&json!(false)), false).is_err());
+        assert!(parse_pipeline_prewarm(Some(&json!("false")), true).is_err());
+    }
 
     fn run_request(request: Value) -> Vec<Value> {
         let mut job = start(&crate::legacy_json::compact_line_bytes(&request)).unwrap();

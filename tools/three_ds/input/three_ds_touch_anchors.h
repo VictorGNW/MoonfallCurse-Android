@@ -70,6 +70,9 @@ class TouchAnchors {
         return mAnchors;
     }
 
+    void SetZoraTouchArt(bool zora) noexcept { mZoraTouchArt.store(zora, std::memory_order_release); }
+    [[nodiscard]] bool ZoraTouchArt() const noexcept { return mZoraTouchArt.load(std::memory_order_acquire); }
+
     void SetTitleDrawsControls(bool draws) noexcept { mTitleDraws.store(draws, std::memory_order_release); }
     [[nodiscard]] bool TitleDrawsControls() const noexcept { return mTitleDraws.load(std::memory_order_acquire); }
 
@@ -77,6 +80,7 @@ class TouchAnchors {
     mutable std::mutex mMutex;
     TouchAnchorSet mAnchors{};
     std::atomic<bool> mTitleDraws{false};
+    std::atomic<bool> mZoraTouchArt{false};
 };
 
 // Developer layouts without an overlay: "A=l,t,r,b;DPAD=l,t,r,b" in window

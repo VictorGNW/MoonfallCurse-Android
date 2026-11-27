@@ -3375,7 +3375,7 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             // native target already is the composed scene.
             const bool applyBoundaryFxaa = fxaaBeforeUi && beforeNativeUi && worldSurface &&
                 !display.PresentationFxaaExcluded && mSpatialAaMode == 1U;
-            const bool composedScene = applyBoundaryFxaa ||
+            const bool composedScene = applyBoundaryFxaa || outputResolutionUi || smaaForDisplay ||
                 effectPlan.SceneOutput != Extension::EffectResource::SceneColor;
             const auto compositionPass = effectPlan.FindPass(
                 Extension::DisplayEffectPass::SceneComposition);
@@ -3492,8 +3492,18 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             Extension::PicaScanoutPolicyInput compositionPolicy{};
             compositionPolicy.TransferFlags = 0U;
             compositionPolicy.AaMode = applyBoundaryFxaa ? 1U : 0U;
-            compositionPolicy.Width = compositionWidth;
-            compositionPolicy.Height = compositionHeight;
+            compositionPolicy.Width = compositionSource->Width;
+            compositionPolicy.Height = compositionSource->Height;
+            const bool sgsrSourceSupported = composedFormat == VK_FORMAT_R8G8B8A8_UNORM ||
+                (composedFormat == VK_FORMAT_R16G16B16A16_SFLOAT && mSgsrFloatSourceSupported);
+            const bool sgsr = outputResolutionUi && mPresentationSgsrEdgeDir && sgsrSourceSupported &&
+                compositionWidth >= compositionSource->Width && compositionHeight >= compositionSource->Height &&
+                (compositionWidth > compositionSource->Width || compositionHeight > compositionSource->Height) &&
+                mNriPicaScanoutPass.ConfigureOffscreen(VK_FORMAT_R8G8B8A8_UNORM, true);
+            if (sgsr) {
+                compositionPolicy.AaMode = applyBoundaryFxaa ? Extension::kPicaScanoutFxaaSgsrEdgeDir
+                                                            : Extension::kPicaScanoutSgsrEdgeDir;
+            }
             compositionPolicy.EffectsComposited = true;
             compositionPolicy.InputEncoding =
                 compositionSource->ColorEncoding;
@@ -3512,8 +3522,7 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
                 mCurrentFrame, Extension::GpuProfileScope::SceneComposite,
                 command);
             const bool nriComposition =
-                mNriPicaScanoutPass.ConfigureOffscreen(
-                    VK_FORMAT_R8G8B8A8_UNORM) &&
+                (sgsr || mNriPicaScanoutPass.ConfigureOffscreen(VK_FORMAT_R8G8B8A8_UNORM)) &&
                 mNriPicaScanoutPass.Execute(
                     {
                         .FrameSlot = mCurrentFrame,
@@ -3570,6 +3579,14 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             copyOutput->SceneEffectsResolved = true;
             if (applyBoundaryFxaa)
                 mDiagnostics.RecordBeforeUiAntiAliasing(true, false);
+            if (sgsr) {
+                static bool logged = false;
+                if (!logged) {
+                    std::fprintf(stderr, "TRIAEVUM_SGSR_EDGEDIR result=active source=%ux%u output=%ux%u\n",
+                                 compositionSource->Width, compositionSource->Height, compositionWidth, compositionHeight);
+                    logged = true;
+                }
+            }
             mDiagnostics.RecordDisplayEffectGraphExecution(
                 effectExecution.Summary());
             restoreEffectPassGuides();
@@ -3949,6 +3966,12 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
         mGpuProfiler.BeginScope(
             mCurrentFrame, Extension::GpuProfileScope::Scanout,
             command);
+        std::optional<VkRect2D> menuBackdropPicture;
+        if (mMenuBackdropVisible && !alphaOverlay &&
+            (scissor.extent.width < mSwapchainExtent.width ||
+             scissor.extent.height < mSwapchainExtent.height)) {
+            menuBackdropPicture = scissor;
+        }
         const bool nriScanout = mNriPicaScanoutPass.Execute({
             mCurrentFrame,
             mFrameCounter,
@@ -3971,7 +3994,7 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             scissor.extent.height,
             {mClearColor[0], mClearColor[1],
              mClearColor[2], mClearColor[3]},
-            alphaOverlay}, scanoutBarrierPlan);
+            alphaOverlay, false, menuBackdropPicture}, scanoutBarrierPlan);
         if (nriScanout) {
             recordEffectPassTransitions(
                 mNriPicaScanoutPass.LastBarrierExecution());
@@ -3993,8 +4016,6 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
             } else {
                 BeginRenderPassIfNeeded();
             }
-            vkCmdSetViewport(command, 0, 1, &viewport);
-            vkCmdSetScissor(command, 0, 1, &scissor);
             vkCmdBindPipeline(
                 command, VK_PIPELINE_BIND_POINT_GRAPHICS,
                 alphaOverlay ? mNativePicaScanoutOverlayPipeline
@@ -4003,6 +4024,24 @@ bool GfxRenderingAPIVulkan::ExecuteNativePicaDisplayGraph(
                 command, VK_PIPELINE_BIND_POINT_GRAPHICS,
                 mNativePicaScanoutPipelineLayout, 0, 1,
                 &descriptor, 0, nullptr);
+            if (menuBackdropPicture) {
+                const auto& rect = *menuBackdropPicture;
+                const auto left = static_cast<float>(rect.offset.x);
+                const auto top = static_cast<float>(rect.offset.y);
+                const auto push = Extension::PicaMenuBackdropConstants(scanout, left, top,
+                    left + rect.extent.width, top + rect.extent.height);
+                const VkViewport backdropViewport{0.0F, 0.0F,
+                    static_cast<float>(mSwapchainExtent.width),
+                    static_cast<float>(mSwapchainExtent.height), 0.0F, 1.0F};
+                const VkRect2D backdropScissor{{0, 0}, mSwapchainExtent};
+                vkCmdSetViewport(command, 0, 1, &backdropViewport);
+                vkCmdSetScissor(command, 0, 1, &backdropScissor);
+                vkCmdPushConstants(command, mNativePicaScanoutPipelineLayout,
+                    VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+                vkCmdDraw(command, 3, 1, 0, 0);
+            }
+            vkCmdSetViewport(command, 0, 1, &viewport);
+            vkCmdSetScissor(command, 0, 1, &scissor);
             vkCmdPushConstants(
                 command, mNativePicaScanoutPipelineLayout,
                 VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(scanout),

@@ -12,6 +12,7 @@ import android.os.Process
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import org.triaevum.android.TurnipDriver
 import org.triaevum.android.forge.InstallService
 
 /**
@@ -61,6 +62,7 @@ object StartupDiagnostics {
         val log = game ?: return
         // The heap first: a long stage (the driver's build string) is cut at the line limit.
         log.record("native [heap ${Debug.getNativeHeapAllocatedSize() shr 20} MiB] $stage")
+        if (stage.startsWith("first_frame_presented ")) TurnipDriver.firstFramePresented()
     }
 
     /**

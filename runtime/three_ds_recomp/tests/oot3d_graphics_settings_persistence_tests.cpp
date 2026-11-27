@@ -1,4 +1,5 @@
 #include "fast/extension/graphics_settings_persistence.h"
+#include "fast/extension/render_resolution_policy.h"
 #include "fast/extension/title_grass_rules_file.h"
 
 #include <gtest/gtest.h>
@@ -1510,15 +1511,24 @@ TEST(Oot3dGraphicsSettingsPersistence, RoundTripsAndInfersTheOutputProvenance) {
 #endif
 }
 
-// Enhanced for Mobile is Enhanced with exactly four values changed: what else
-// differs from Enhanced would change the phone's look or cost unnoticed.
-TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileIsEnhancedAtAPhonesCost) {
+// Track the preset's intended differences from the desktop profile.
+TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     using namespace Fast::Extension;
     const auto mobile = GraphicsSettingsService::Preset(GraphicsPreset::EnhancedForMobile);
     const auto enhanced = GraphicsSettingsService::Preset(GraphicsPreset::Enhanced);
     EXPECT_EQ(mobile.Preset, GraphicsPreset::EnhancedForMobile);
-    EXPECT_EQ(mobile.FrameRate, FrameRateMode::Original30);
+    EXPECT_EQ(mobile.FrameRate, FrameRateMode::Interpolated2x);
     EXPECT_FLOAT_EQ(mobile.InternalResolutionScale, 0.8F);
+    EXPECT_TRUE(mobile.SgsrEdgeDir);
+    EXPECT_FLOAT_EQ(ResolveInternalResolutionScale(mobile, false, 720U), 0.8F);
+    EXPECT_FLOAT_EQ(ResolveInternalResolutionScale(mobile, false, 1080U), 720.0F / 1080.0F);
+    EXPECT_EQ(ScaleRenderExtent({1920, 1080}, ResolveInternalResolutionScale(mobile, false, 1080U)).Height, 720U);
+    EXPECT_EQ(mobile.AntiAliasing, AntiAliasingMode::Smaa1x);
+    EXPECT_EQ(mobile.MsaaSamples, 1U);
+    EXPECT_EQ(mobile.Anisotropy, 8U);
+    EXPECT_EQ(mobile.TextureMipLimit, 4U);
+    EXPECT_FLOAT_EQ(mobile.FovMultiplier, 1.10F);
+    EXPECT_TRUE(mobile.ExtendedDrawDistance);
     EXPECT_EQ(mobile.Grass.MaxInstancesPerRoom, 400000U);
     EXPECT_FALSE(mobile.Effects.WaterReflections);
     // Aspect Free is Android's host-owned default, outside the preset.
@@ -1528,7 +1538,8 @@ TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileIsEnhancedAtAPhonesCost)
     EXPECT_EQ(document["Preset"], "EnhancedForMobile");
     auto reference = SerializeGraphicsSettings(enhanced);
     EXPECT_EQ(reference["Preset"], "Enhanced");
-    for (const auto* path : {"/Preset", "/FrameRate/Mode", "/RenderScale", "/Grass/Budget/MaxInstancesPerRoom",
+    for (const auto* path : {"/Preset", "/AA/Mode", "/RenderScale", "/SgsrEdgeDir",
+                             "/Textures/Anisotropy", "/Textures/MipLimit", "/Grass/Budget/MaxInstancesPerRoom",
                              "/Effects/Reflections/Water"}) {
         const nlohmann::json::json_pointer pointer{path};
         ASSERT_TRUE(document.contains(pointer)) << path;
@@ -1554,16 +1565,18 @@ TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileIsEnhancedAtAPhonesCost)
     // Custom keeps every value; the validator keeps the name.
     const auto custom = GraphicsSettingsService::PresetForCurrent(GraphicsPreset::Custom, chosen);
     EXPECT_EQ(custom.Preset, GraphicsPreset::Custom);
-    EXPECT_EQ(custom.FrameRate, FrameRateMode::Original30);
+    EXPECT_EQ(custom.FrameRate, FrameRateMode::Interpolated2x);
     EXPECT_FLOAT_EQ(custom.InternalResolutionScale, 0.8F);
     EXPECT_EQ(GraphicsSettingsService::Validate(chosen, GraphicsCapabilities{}).Value.Preset,
               GraphicsPreset::EnhancedForMobile);
 
-    // The display reset keeps the preset's scale, so the name stays true.
+    // The display reset disables SMAA and leaves the preset.
     auto reset = chosen;
     ResetDisplaySettings(reset);
-    EXPECT_EQ(reset.Preset, GraphicsPreset::EnhancedForMobile);
-    EXPECT_FLOAT_EQ(reset.InternalResolutionScale, 0.8F);
+    EXPECT_EQ(reset.Preset, GraphicsPreset::Custom);
+    EXPECT_EQ(reset.AntiAliasing, AntiAliasingMode::Off);
+    EXPECT_FALSE(reset.SgsrEdgeDir);
+    EXPECT_FLOAT_EQ(reset.InternalResolutionScale, 1.0F);
     reset = back;
     ResetDisplaySettings(reset);
     EXPECT_FLOAT_EQ(reset.InternalResolutionScale, 1.0F);
@@ -1586,10 +1599,21 @@ TEST(Oot3dGraphicsSettingsPersistence, LoadsConfigurationsWithAndWithoutEnhanced
     // reduced values stays exactly that. Existing choices are never relabelled.
     auto older = document;
     older["Preset"] = "Enhanced";
+    older["FrameRate"]["Mode"] = "Original30";
+    older["RenderScale"] = 0.8F;
     const auto kept = DeserializeGraphicsSettings(older);
     EXPECT_EQ(kept.Value.Preset, GraphicsPreset::Enhanced);
     EXPECT_FALSE(kept.NeedsRewrite);
     EXPECT_EQ(SerializeGraphicsSettings(kept.Value), older);
+
+    auto legacyMobile = document;
+    legacyMobile.erase("SgsrEdgeDir");
+    legacyMobile["Textures"].erase("MipLimit");
+    legacyMobile["RenderScale"] = 1.0F;
+    const auto keptMobile = DeserializeGraphicsSettings(legacyMobile, saved);
+    EXPECT_FALSE(keptMobile.Value.SgsrEdgeDir);
+    EXPECT_EQ(keptMobile.Value.TextureMipLimit, 0U);
+    EXPECT_FLOAT_EQ(ResolveInternalResolutionScale(keptMobile.Value, false, 1080U), 1.0F);
 
     // A document from before anisotropic filtering takes the preset's 4x.
     auto withoutTextures = document;
@@ -1610,7 +1634,7 @@ TEST(Oot3dGraphicsSettingsPersistence, OnlyAMobileHostOffersEnhancedForMobile) {
     };
     EXPECT_EQ(list(GraphicsPresetHost::Desktop), (std::vector<std::string>{"Authentic", "Enhanced", "Toon"}));
     EXPECT_EQ(list(GraphicsPresetHost::Mobile),
-              (std::vector<std::string>{"Authentic", "Enhanced", "Enhanced for Mobile", "Toon"}));
+              (std::vector<std::string>{"Authentic", "Enhanced for Mobile"}));
     EXPECT_STREQ(GraphicsPresetDisplayName(GraphicsPreset::Custom), "Custom");
 
     // The numbers reports print stay, and desktop menus keep their rows.
@@ -1620,9 +1644,9 @@ TEST(Oot3dGraphicsSettingsPersistence, OnlyAMobileHostOffersEnhancedForMobile) {
         EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Desktop, preset), static_cast<int>(preset));
     // A configuration moved to a desktop shows the Custom row of its menu.
     EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Desktop, GraphicsPreset::EnhancedForMobile), 3);
-    EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Mobile, GraphicsPreset::EnhancedForMobile), 2);
-    EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Mobile, GraphicsPreset::Toon), 3);
-    EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Mobile, GraphicsPreset::Custom), 4);
+    EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Mobile, GraphicsPreset::EnhancedForMobile), 1);
+    EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Mobile, GraphicsPreset::Toon), 2);
+    EXPECT_EQ(GraphicsPresetChoiceIndex(GraphicsPresetHost::Mobile, GraphicsPreset::Custom), 2);
 }
 
 TEST(Oot3dGraphicsSettingsPersistence, RoundTripsTheAspectRatioAsHostOwnedOutputState) {

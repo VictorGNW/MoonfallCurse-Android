@@ -127,7 +127,6 @@ def verify_apk(apksigner: str, apk: Path, expected_signer: str) -> None:
     print(verified.stdout, end="")
 
 
-
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--title", required=True, choices=("oot3d", "mm3d"))
@@ -147,10 +146,17 @@ def main(argv=None) -> int:
         parser.error("--work must be outside the repository")
     environ = dict(os.environ)
     signed = not args.unsigned_candidate and all(environ.get(name) for name in SIGNING_VARIABLES)
-    expected_signer = environ.get("TRIAEVUM_ANDROID_SIGNER_SHA256", "")
+    expected_signer = environ.get("TRIAEVUM_ANDROID_SIGNER_SHA256", "").lower()
+    if args.title == "mm3d" and args.run and not args.unsigned_candidate:
+        pinned = (ROOT / "ports/android/signing/mm3d-apk-cert.sha256").read_text().strip()
+        if expected_signer and expected_signer != pinned:
+            parser.error("Moonfall Curse must use the signing certificate of the published app")
+        expected_signer = pinned
     if args.run and not args.unsigned_candidate:
         if not signed:
             parser.error("set all Android signing variables or pass --unsigned-candidate")
+        if args.title == "mm3d" and not environ.get("TRIAEVUM_RELEASE_SIGNING_KEY"):
+            parser.error("set the separate Forge publisher key in TRIAEVUM_RELEASE_SIGNING_KEY")
         if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_signer):
             parser.error("set TRIAEVUM_ANDROID_SIGNER_SHA256 to the permanent certificate SHA-256")
         if shutil.which(args.apksigner) is None:

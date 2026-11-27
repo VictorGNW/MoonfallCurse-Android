@@ -90,6 +90,7 @@ public:
 
   // The game's name in capability messages.
   [[nodiscard]] virtual const char *GameName() const = 0;
+  [[nodiscard]] virtual bool UsesZoraTouchArt(oot3d::recomp::a32::MemoryBus&) const { return false; }
   // The game window's icon for this title (static pixels); null keeps the
   // game icon (TriAevumWindowIcon, OoT3D's).
   [[nodiscard]] virtual const Fast::WindowIconImage *WindowIcon() const { return nullptr; }

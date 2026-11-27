@@ -31,6 +31,8 @@ struct Row {
     std::string Text; // Info: the value shown
     // Choice: one label per value; Number: the range and step.
     std::vector<std::string> Choices;
+    std::string ChoiceFallback; // Choice: display text when Read has no corresponding index
+    bool ReapplyChoice = false; // Choice: apply an explicitly selected value again
     int Minimum = 0;
     int Maximum = 0;
     int Step = 1;

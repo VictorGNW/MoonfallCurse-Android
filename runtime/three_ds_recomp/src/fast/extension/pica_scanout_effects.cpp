@@ -92,7 +92,8 @@ void main() {
 
 std::string BuildPicaScanoutFragmentShader(bool separateSampler,
                                           std::optional<int> diagnosticMode,
-                                          PicaScanoutOrientation orientation) {
+                                          PicaScanoutOrientation orientation,
+                                          bool includeSgsrEdgeDir) {
     std::string source = R"glsl(
 #version 450
 layout(set = 0, binding = 0) uniform sampler2D physical_scanout;
@@ -210,6 +211,11 @@ vec4 oot3d_compose_at(vec2 uv) {
     return color;
 }
 )glsl";
+    if (includeSgsrEdgeDir) {
+        source +=
+#include "sgsr_edge_direction_glsl.inc"
+            ;
+    }
     source += BuildSpatialAaShaderLibrary();
     source += EffectSurfaceCoordinateShaderLibrary;
     source += PicaGuideDiagnosticShaderLibrary(
@@ -219,6 +225,24 @@ vec4 oot3d_compose_at(vec2 uv) {
 void main() {
     vec2 source_uv = OOT3D_SCANOUT_SOURCE_UV;
     if (OOT3D_SCANOUT_FLIP_Y) source_uv.y = 1.0 - source_uv.y;
+    if (scanout.aa_mode == 2u) {
+        vec2 pixel = gl_FragCoord.xy;
+        if (all(greaterThanEqual(pixel, vec2(scanout.projection_offset_x, scanout.projection_offset_y))) &&
+            all(lessThan(pixel, vec2(scanout.projection_scale_x, scanout.projection_scale_y)))) discard;
+
+        vec2 radius = clamp(2.0 * scanout.inverse_size, vec2(0.002), vec2(0.009));
+        vec3 scene = 4.0 * texture(physical_scanout, source_uv).rgb;
+        scene += texture(physical_scanout, source_uv + vec2(radius.x, 0.0)).rgb;
+        scene += texture(physical_scanout, source_uv - vec2(radius.x, 0.0)).rgb;
+        scene += texture(physical_scanout, source_uv + vec2(0.0, radius.y)).rgb;
+        scene += texture(physical_scanout, source_uv - vec2(0.0, radius.y)).rgb;
+        vec3 tint = vec3(0.40, 0.34, 0.16);
+        if (scanout.input_linear != 0u) tint = oot3d_srgb_to_linear(tint);
+        scene = mix(scene * (0.38 / 8.0), tint, 0.22);
+        if (scanout.encode_srgb != 0u) scene = oot3d_linear_to_srgb(scene);
+        output_color = vec4(scene, 1.0);
+        return;
+    }
     if(oot3d_guide_diagnostic_mode!=0 && (scanout.ambient_occlusion!=0u || scanout.outline!=0u)) {
         output_color=vec4(oot3d_guide_diagnostic(source_uv),1.0);
         return;
@@ -226,7 +250,15 @@ void main() {
     vec4 center = oot3d_compose_at(source_uv);
     if (scanout.aa_mode == 1u) output_color = oot3d_fxaa(source_uv, center);
     else output_color = center;
-    if(scanout.encode_srgb!=0u)
+)glsl";
+    if (includeSgsrEdgeDir) {
+        source += R"glsl(    if (scanout.aa_mode == 3u || scanout.aa_mode == 4u) {
+        if (scanout.aa_mode == 4u) center = oot3d_fxaa(source_uv, center);
+        output_color = sgsr_edge_direction(source_uv, center);
+    }
+)glsl";
+    }
+    source += R"glsl(    if(scanout.encode_srgb!=0u)
         output_color.rgb=oot3d_linear_to_srgb(output_color.rgb);
 }
 )glsl";
@@ -253,7 +285,7 @@ void main() {
                 "uniform " + kind + "texture2D " + std::string(name) + ";";
             source.replace(source.find(combined), combined.size(), texture);
             if (integer) continue;
-            for (const std::string operation : {"texture", "textureSize", "texelFetch"}) {
+            for (const std::string operation : {"texture", "textureSize", "texelFetch", "textureGather"}) {
                 const std::string sample = operation + "(" + name + ",";
                 const std::string separate = operation + "(" + kind + "sampler2D(" + name + ", scanout_sampler),";
                 size_t offset = 0;

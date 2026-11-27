@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 
@@ -69,6 +70,9 @@ class TouchOverlaySettings {
         return mRequests;
     }
 
+    void SetMenuOpen(bool open) noexcept { mMenuOpen.store(open, std::memory_order_relaxed); }
+    [[nodiscard]] bool MenuOpen() const noexcept { return mMenuOpen.load(std::memory_order_relaxed); }
+
     static TouchOverlayValues Clean(TouchOverlayValues values) noexcept {
         values.OpacityPercent = std::clamp(values.OpacityPercent, 0, 100);
         values.SizePercent = std::clamp(values.SizePercent, 50, 200);
@@ -76,6 +80,7 @@ class TouchOverlaySettings {
     }
 
   private:
+    std::atomic<bool> mMenuOpen{false};
     mutable std::mutex mMutex;
     bool mPresent = false;
     TouchOverlayValues mValues;

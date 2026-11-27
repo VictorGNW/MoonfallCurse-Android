@@ -210,4 +210,11 @@
     <string name="diagnostics_crash_message">L\'ultima sessione è terminata con: %1$s. Un rapporto di diagnostica può essere utile per una segnalazione; non viene inviato nulla da nessuna parte.</string>
     <string name="diagnostics_view">Mostra rapporto</string>
     <string name="diagnostics_dismiss">Chiudi</string>
+    <string name="forge_prewarm_pipelines">Prepara gli shader noti prima di giocare</string>
+    <string name="forge_prewarm_pipelines_details">Può ridurre gli scatti all’inizio del gioco. L’installazione richiede più tempo, usa più spazio per la cache e può scaldare il telefono. Disattiva l’opzione per installare più rapidamente.</string>
+    <string name="forge_stage_percent">%1$d%%</string>
+    <string name="forge_stage_remaining">Circa %1$s per questo passaggio</string>
+    <string name="forge_background_progress_hint">Continua in background, anche con lo schermo bloccato.</string>
+    <string name="forge_language_automatic">Automatico (lingua del dispositivo)</string>
+    <string name="forge_language_automatic_button">Lingua: Automatico</string>
 </resources>

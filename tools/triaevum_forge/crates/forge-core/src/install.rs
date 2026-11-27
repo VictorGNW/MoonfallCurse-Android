@@ -311,6 +311,17 @@ pub fn install_private_title_with(
     report: Report<'_>,
     cancel: &CancelToken,
 ) -> Result<Value> {
+    install_private_title_with_prewarm(request, options, true, services, report, cancel)
+}
+
+pub(crate) fn install_private_title_with_prewarm(
+    request: InstallRequest,
+    options: InstallOptions,
+    prewarm_pipelines: bool,
+    services: &dyn NativeServices,
+    report: Report<'_>,
+    cancel: &CancelToken,
+) -> Result<Value> {
     let started = Instant::now();
     let (package_root, data_root) =
         installation_paths(&request.package_root, request.data_root.as_deref(), &request.target)?;
@@ -419,7 +430,7 @@ pub fn install_private_title_with(
         let android_runtime = android.map(|_| (runtime.clone(), runtime_plugin.clone()));
         let android_runtime =
             android_runtime.as_ref().map(|(runtime, title_file)| AndroidRuntime { runtime, title_file });
-        let built = install_precompiled_title(
+        let built = install_precompiled_title_with_prewarm(
             &PrecompiledRequest {
                 prepared_directory: &prepared_directory,
                 root: &root,
@@ -431,6 +442,7 @@ pub fn install_private_title_with(
                 android: android_runtime.as_ref(),
                 hud_layout: options.hud_layout,
             },
+            prewarm_pipelines,
             services,
             report,
             cancel,
@@ -560,6 +572,16 @@ fn record_library_module(
 /// the runtime and the active title in one activation transaction.
 pub fn install_precompiled_title(
     request: &PrecompiledRequest<'_>,
+    services: &dyn NativeServices,
+    report: Report<'_>,
+    cancel: &CancelToken,
+) -> Result<Value> {
+    install_precompiled_title_with_prewarm(request, true, services, report, cancel)
+}
+
+fn install_precompiled_title_with_prewarm(
+    request: &PrecompiledRequest<'_>,
+    prewarm_pipelines: bool,
     services: &dyn NativeServices,
     report: Report<'_>,
     cancel: &CancelToken,
@@ -758,7 +780,9 @@ pub fn install_precompiled_title(
         None => Some(layout::launch_runtime_path(root)?),
         Some(_) => None,
     };
-    let pipeline_preparation = if cancel.is_cancelled() {
+    let pipeline_preparation = if !prewarm_pipelines {
+        Some([("device_pipeline_prewarm".into(), json!("skipped_by_user"))].into_iter().collect())
+    } else if cancel.is_cancelled() {
         None
     } else {
         forge_native::prepare_installed_device_pipelines(

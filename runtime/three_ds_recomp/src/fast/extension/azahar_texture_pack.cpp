@@ -1,4 +1,5 @@
 #include "oot3d/renderer/azahar_texture_pack.h"
+#include "bcn_dds.h"
 #include "fast/extension/portable_path_setting.h"
 #include "fast/renderer/content_hash.h"
 #include "azahar_pbr_materials.h"
@@ -185,13 +186,13 @@ AzaharTexturePackConfiguration NormalizeConfiguration(AzaharTexturePackConfigura
     return configuration;
 }
 
-std::vector<uint8_t> ReadBinaryFile(const std::filesystem::path& path) {
+std::vector<uint8_t> ReadBinaryFile(const std::filesystem::path& path, uint64_t maximumBytes) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) {
         throw std::runtime_error("unable to open custom texture " + path.string());
     }
     const std::streamsize size = input.tellg();
-    if (size <= 0 || static_cast<uint64_t>(size) > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+    if (size <= 0 || static_cast<uint64_t>(size) > maximumBytes) {
         throw std::runtime_error("custom texture has an invalid file size");
     }
     input.seekg(0);
@@ -450,12 +451,14 @@ std::unordered_map<uint64_t, IndexedTexture> IndexTexturePack(const std::filesys
         if (hashes.empty()) {
             continue;
         }
-        if (extension != ".png") {
+        if (extension == ".ktx") {
             ++unsupportedFiles;
             continue;
         }
         for (const uint64_t hash : hashes) {
-            index.try_emplace(hash, IndexedTexture{ path, pack.FlipPngFiles });
+            auto [existing, added] = index.try_emplace(hash, IndexedTexture{ path, pack.FlipPngFiles });
+            if (!added && extension == ".png" && Lowercase(existing->second.Path.extension().string()) == ".dds")
+                existing->second = IndexedTexture{path, pack.FlipPngFiles};
         }
     }
     return index;
@@ -463,7 +466,25 @@ std::unordered_map<uint64_t, IndexedTexture> IndexTexturePack(const std::filesys
 
 std::shared_ptr<const AzaharTextureReplacement> DecodeReplacement(
     const IndexedTexture& indexed, uint64_t hash, uint64_t generation) {
-    const auto input = ReadBinaryFile(indexed.Path);
+    const bool dds = Lowercase(indexed.Path.extension().string()) == ".dds";
+    const auto input = ReadBinaryFile(indexed.Path, dds ? kMaxBcnDdsFileBytes : std::numeric_limits<int>::max());
+    if (dds) {
+        auto decoded = DecodeBcnDds(input);
+        auto replacement = std::make_shared<AzaharTextureReplacement>();
+        replacement->Width = decoded.Width;
+        replacement->Height = decoded.Height;
+        replacement->MipLevels = decoded.MipLevels;
+        replacement->NativeHash = hash;
+        replacement->PixelContentHash = AzaharCityHash64(decoded.BaseRgba8);
+        replacement->Generation = generation;
+        replacement->SourcePath = indexed.Path;
+        replacement->BcnSource = true;
+        replacement->Srgb = decoded.Srgb;
+        replacement->Rgba8 = std::make_shared<const std::vector<uint8_t>>(std::move(decoded.BaseRgba8));
+        if (!decoded.MipsRgba8.empty())
+            replacement->MipsRgba8 = std::make_shared<const std::vector<uint8_t>>(std::move(decoded.MipsRgba8));
+        return replacement;
+    }
     int width = 0;
     int height = 0;
     int channels = 0;

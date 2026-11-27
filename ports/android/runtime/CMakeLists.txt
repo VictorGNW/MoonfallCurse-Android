@@ -43,3 +43,6 @@ set_property(SOURCE "${root}/tools/renderer/pipeline_prepare/main.cpp" TARGET_DI
 target_include_directories(oot3d_native_game PRIVATE
     "${root}/tools/renderer/pipeline_prepare" "${root}/tools/oot3d/native_pica_frontend")
 target_link_libraries(oot3d_native_game PRIVATE three_ds_recomp_shaderc NRI)
+
+include(turnip.cmake)
+triaevum_enable_turnip(oot3d_native_game)

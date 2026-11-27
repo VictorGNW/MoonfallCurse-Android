@@ -16,15 +16,17 @@ ThreeDsRecomp::Input::VirtualPad& Pad() { return ThreeDsRecomp::Input::TouchOver
 
 extern "C" {
 
-// hidMask: one 3DS HID PAD bit (the overlay adapter's vocabulary).
+// hidMask: 3DS HID PAD bits, including simultaneous shortcut chords.
 JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_button(JNIEnv*, jobject, jint hidMask,
                                                                           jboolean pressed) {
     const auto mask = static_cast<unsigned>(hidMask);
+    std::uint32_t controls = 0;
     for (unsigned bit = 0; bit < 32U; ++bit) {
         ThreeDsRecomp::Input::DigitalControl control{};
         if ((mask & (1U << bit)) != 0U && ThreeDsRecomp::Input::DigitalControlForHidBit(bit, &control))
-            Pad().SetControl(control, pressed == JNI_TRUE);
+            controls |= ThreeDsRecomp::Input::VirtualPad::Bit(control);
     }
+    Pad().SetControls(controls, pressed == JNI_TRUE);
 }
 
 JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_circlePad(JNIEnv*, jobject, jfloat x, jfloat y) {
@@ -67,6 +69,10 @@ JNIEXPORT jboolean JNICALL Java_org_triaevum_android_NativeInputBridge_titleDraw
     return ThreeDsRecomp::Input::OverlayTouchAnchors().TitleDrawsControls() ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL Java_org_triaevum_android_NativeInputBridge_zoraTouchArt(JNIEnv*, jobject) {
+    return ThreeDsRecomp::Input::OverlayTouchAnchors().ZoraTouchArt() ? JNI_TRUE : JNI_FALSE;
+}
+
 // The overlay's own settings, as it saved them.
 JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_reportOverlaySettings(
     JNIEnv*, jobject, jint appliedRevision, jboolean visible, jint opacity, jint size, jboolean vibration,
@@ -77,19 +83,22 @@ JNIEXPORT void JNICALL Java_org_triaevum_android_NativeInputBridge_reportOverlay
 }
 
 // The host menu's requests: revision, visible, opacity, size, vibration,
-// hide with controller, layout editing serial, layout reset serial.
+// hide with controller, layout editing serial, layout reset serial, menu open.
 JNIEXPORT jintArray JNICALL Java_org_triaevum_android_NativeInputBridge_overlayRequests(JNIEnv* env, jobject) {
-    const auto requests = ThreeDsRecomp::Input::OverlayTouchSettings().PendingRequests();
-    const jint values[8]{static_cast<jint>(requests.Revision),
+    const auto& settings = ThreeDsRecomp::Input::OverlayTouchSettings();
+    const auto requests = settings.PendingRequests();
+    const jint values[]{static_cast<jint>(requests.Revision),
                          requests.Values.Visible ? 1 : 0,
                          requests.Values.OpacityPercent,
                          requests.Values.SizePercent,
                          requests.Values.Vibration ? 1 : 0,
                          requests.Values.HideWithController ? 1 : 0,
                          static_cast<jint>(requests.EditLayoutSerial),
-                         static_cast<jint>(requests.ResetLayoutSerial)};
-    jintArray result = env->NewIntArray(8);
-    if (result != nullptr) env->SetIntArrayRegion(result, 0, 8, values);
+                         static_cast<jint>(requests.ResetLayoutSerial),
+                         settings.MenuOpen() ? 1 : 0};
+    constexpr jsize count = sizeof(values) / sizeof(values[0]);
+    jintArray result = env->NewIntArray(count);
+    if (result != nullptr) env->SetIntArrayRegion(result, 0, count, values);
     return result;
 }
 

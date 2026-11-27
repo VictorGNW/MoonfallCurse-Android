@@ -28,7 +28,7 @@ fn preflight(message: &str) -> ForgeError {
 pub enum ProductDefaults {
     /// Windows, Linux and macOS: Enhanced at interpolation x2.
     Desktop,
-    /// Android (`ProductDefaultGraphicsSettings`): Enhanced for Mobile at 30 fps.
+    /// Android (`ProductDefaultGraphicsSettings`): Enhanced for Mobile at interpolation x2.
     Android,
 }
 
@@ -41,20 +41,6 @@ impl ProductDefaults {
         match self {
             Self::Desktop => "Enhanced",
             Self::Android => "EnhancedForMobile",
-        }
-    }
-
-    const fn frame_rate(self) -> &'static str {
-        match self {
-            Self::Desktop => "Interpolated2x",
-            Self::Android => "Original30",
-        }
-    }
-
-    const fn frame_rate_error(self) -> &'static str {
-        match self {
-            Self::Desktop => "Runtime defaults do not enable visual interpolation x2",
-            Self::Android => "Runtime defaults do not keep the original 30 fps",
         }
     }
 }
@@ -107,13 +93,9 @@ pub fn validate_product_info_for(
     if !eq_str(get(graphics, "Preset"), defaults.preset()) {
         return Err(preflight(&format!("Runtime defaults do not select the {} preset", defaults.preset())));
     }
-    let mode = match graphics.get("FrameRate") {
-        None => &Value::Null,
-        Some(Value::Object(frame_rate)) => get(frame_rate, "Mode"),
-        Some(_) => return Err(preflight(defaults.frame_rate_error())),
-    };
-    if !eq_str(mode, defaults.frame_rate()) {
-        return Err(preflight(defaults.frame_rate_error()));
+    let mode = graphics.get("FrameRate").and_then(|frame_rate| frame_rate.get("Mode"));
+    if !mode.is_some_and(|mode| eq_str(mode, "Interpolated2x")) {
+        return Err(preflight("Runtime defaults do not enable visual interpolation x2"));
     }
     Ok(())
 }
