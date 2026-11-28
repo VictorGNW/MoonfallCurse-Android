@@ -46,10 +46,14 @@ int main(int argc, char** argv) {
   // A plugin built from this tree carries the capability tail (F07 option 2).
   if (!Oot3dWholeAotPluginExitRequestSupported()) return Fail("exit-request capability missing");
 
+  // Forge activation and preflight can select the same library in one process.
+  ConfigureTitlePlugin(argv[1]);
   try {
-    ConfigureTitlePlugin(argv[1]);
-    return Fail("re-selection after query was accepted");
-  } catch (const std::runtime_error&) {
+    ConfigureTitlePlugin(std::filesystem::path(argv[1]).concat(".other"));
+    return Fail("changing the selected plugin after query was accepted");
+  } catch (const std::runtime_error& error) {
+    if (std::string_view(error.what()) != "Title plugin was already queried")
+      return Fail("the plugin change was rejected for the wrong reason");
   }
   std::puts("{\"selected\":true,\"query\":true,\"entry_points\":true,\"sealed\":true}");
   return 0;

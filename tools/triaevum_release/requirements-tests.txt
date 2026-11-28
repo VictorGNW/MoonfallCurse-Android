@@ -1,4 +1,5 @@
 # Developer/CI tests only; not Forge's frozen application dependencies.
 capstone==5.0.7
+cryptography==50.0.2
 numpy==2.3.4
 Pillow==10.4.0
