@@ -5,8 +5,9 @@ MM3D-Android is an experimental native Android recompilation of **The Legend of 
 ## Current status
 
 - **MM3D-Android** uses the Moonfall Curse build profile (`mc`, `org.triaevum.moonfallcurse`). It targets ARM64 phones running Android 10 (API 29) or later with a compatible Vulkan driver. The app contains the Forge installer and an editable touch overlay derived from Azahar.
-- **Hardware validation is pending for this build.** ROM import through Forge, gameplay, saving, touch and controller input, and app resume still need end-to-end validation for Moonfall Curse on Android.
-- **Previous MM3D-Mobile prototype.** A brief gameplay test reached in-game play on a Motorola Edge 60 with a Mali-G615 MC2 using a decrypted USA v1.1 dump. The prototype also compiled the title module in Termux from C++ generated on a PC. Those results apply to the [MM3D-Mobile prototype](https://github.com/VictorGNW/MM3D-Mobile/tree/46caf82a3014661b9407aa38aa4e57cb2bcda71e).
+- The latest public APK is [0.5.0-alpha.2](https://github.com/VictorGNW/MoonfallCurse-Android/releases/tag/v0.5.0-alpha.2). The [consolidated Android candidate](https://github.com/VictorGNW/MoonfallCurse-Android/pull/10) adds shader-cache and Vulkan recovery changes, the revised mobile graphics preset, SGSR Edge Direction, BCn-to-ASTC texture transcoding, and Turnip support for compatible Adreno devices. See the [changelog](CHANGELOG.md).
+- The consolidated candidate passed the Android APK audit with the published signing certificate. On-device validation of that build is pending, including Forge installation, first frame, app resume, and the Turnip test variant.
+- A brief gameplay test reached in-game play on a Motorola Edge 60 with a Mali-G615 MC2 using a decrypted USA v1.1 dump on the [earlier MM3D-Mobile prototype](https://github.com/VictorGNW/MM3D-Mobile/tree/46caf82a3014661b9407aa38aa4e57cb2bcda71e). USA v1.1 support for the current Forge package is tracked separately in [PR #2](https://github.com/VictorGNW/MoonfallCurse-Android/pull/2).
 
 ## Build and test
 
@@ -42,6 +43,5 @@ See the [documentation index](docs/INDEX.md) for Android builds, Vulkan
 compatibility, performance investigations and upstream tracking. Follow the
 [development instructions](AGENTS.md) when working on this repository.
 
-The published Android test build is [0.5.0-alpha.2](https://github.com/VictorGNW/MoonfallCurse-Android/releases/tag/v0.5.0-alpha.2).
 Consult the [device test status](ports/android/ANDROID_TEST_STATUS.md) for
 feature validation and compatibility reports.
