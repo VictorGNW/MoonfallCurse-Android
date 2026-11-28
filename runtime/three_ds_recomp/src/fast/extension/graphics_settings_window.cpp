@@ -260,7 +260,9 @@ void GraphicsSettingsPanel::Draw() {
     // tabs of those names; every other group (or ungrouped tab) is a
     // top-level tab, in the order it was first installed.
     std::vector<std::shared_ptr<GraphicsSettingsPanelTab>> displayTabs;
+#if !defined(__ANDROID__)
     std::vector<std::shared_ptr<GraphicsSettingsPanelTab>> lightingTabs;
+#endif
     std::vector<std::pair<std::string, std::vector<std::shared_ptr<GraphicsSettingsPanelTab>>>> groups;
     for (const auto& tab : SnapshotPanelTabs()) {
         const char* group = tab->Group();
@@ -269,7 +271,9 @@ void GraphicsSettingsPanel::Draw() {
             continue;
         }
         if (group != nullptr && std::string_view(group) == kLightingSettingsGroup) {
+#if !defined(__ANDROID__)
             lightingTabs.push_back(tab);
+#endif
             continue;
         }
         const std::string name = group != nullptr ? group : tab->Label();
@@ -286,6 +290,7 @@ void GraphicsSettingsPanel::Draw() {
         tab->Draw();
         ImGui::PopID();
     };
+#if !defined(__ANDROID__)
     // An unsaved preview (the scene lights before their Save) is marked on its
     // tab and its group, and named above the tabs, wherever F1 is (#68).
     const bool lightingPreview = std::any_of(lightingTabs.begin(), lightingTabs.end(),
@@ -296,6 +301,7 @@ void GraphicsSettingsPanel::Draw() {
                            kUnsavedPreviewMarker);
         ImGui::PopStyleColor();
     }
+#endif
     if (ImGui::BeginTabBar("##Oot3dSettingsTabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
         if (ImGui::BeginTabItem("Display")) {
             // The renderer's sections, then the application's below them.
@@ -307,19 +313,35 @@ void GraphicsSettingsPanel::Draw() {
             ImGui::EndChild();
             ImGui::EndTabItem();
         }
+#if defined(__ANDROID__)
+        if (ImGui::BeginTabItem("Style")) {
+            DrawSettingsPage("##StyleContent", {&GraphicsSettingsPanel::DrawToonSettings});
+            ImGui::EndTabItem();
+        }
+#else
         if (ImGui::BeginTabItem("Lighting", nullptr,
                                 lightingPreview ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None)) {
             DrawLightingTab(lightingTabs);
             ImGui::EndTabItem();
         }
+#endif
         if (!nativeRequired && ImGui::BeginTabItem("Grass")) {
             DrawGrassSettings();
             ImGui::EndTabItem();
         }
+#if defined(__ANDROID__)
+        if (ImGui::BeginTabItem("Texture packs")) {
+            ImGui::BeginChild("##TextureContent");
+            DrawTextureSettings();
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+#else
         if (ImGui::BeginTabItem("Materials")) {
             DrawMaterialsTab();
             ImGui::EndTabItem();
         }
+#endif
         // A developer lab tab request; product builds have none.
         std::string requested;
 #if defined(TRIAEVUM_RENDERER_DEVELOPER_TOOLS)

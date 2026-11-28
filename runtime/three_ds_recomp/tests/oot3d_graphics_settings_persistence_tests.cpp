@@ -1511,6 +1511,46 @@ TEST(Oot3dGraphicsSettingsPersistence, RoundTripsAndInfersTheOutputProvenance) {
 #endif
 }
 
+#if defined(__ANDROID__)
+TEST(Oot3dGraphicsSettingsPersistence, AndroidDisablesAdvancedEffectsFromPresetsAndSavedSettings) {
+    using namespace Fast::Extension;
+    auto saved = GraphicsSettingsService::Preset(GraphicsPreset::EnhancedForMobile);
+    saved.Effects.SurfaceLighting = SurfaceLightingMode::PerPixelPbr;
+    saved.Effects.DirectionalShadows.Mode = DirectionalShadowMode::VirtualShadowMaps;
+    saved.Effects.PointShadows.Mode = PointShadowMode::CubeMaps;
+    saved.Effects.GlobalIllumination.Mode = GlobalIlluminationMode::ScreenSpace;
+    saved.Effects.AmbientOcclusion = AmbientOcclusionMode::Gtao;
+    saved.Effects.Reflections = ReflectionMode::HiZ;
+    saved.Effects.WaterReflections = true;
+    saved.TexturePacks.Azahar.LoadCustomTextures = true;
+
+    GraphicsCapabilities capabilities;
+    capabilities.Set(GraphicsCapability::NativeSurfaceLighting, true);
+    capabilities.Set(GraphicsCapability::AnisotropicFiltering, true);
+    capabilities.Set(GraphicsCapability::Smaa1x, true);
+    const auto validated = GraphicsSettingsService::Validate(saved, capabilities);
+    ASSERT_TRUE(validated.Accepted());
+    const GraphicsSettingsService startup(saved);
+    const auto preset = GraphicsSettingsService::PresetForCurrent(GraphicsPreset::EnhancedForMobile, saved);
+    for (const auto* result : {&startup.Current(), &validated.Value, &preset}) {
+        EXPECT_EQ(result->Effects.SurfaceLighting, SurfaceLightingMode::Native);
+        EXPECT_EQ(result->Effects.DirectionalShadows.Mode, DirectionalShadowMode::Off);
+        EXPECT_EQ(result->Effects.PointShadows.Mode, PointShadowMode::Off);
+        EXPECT_EQ(result->Effects.GlobalIllumination.Mode, GlobalIlluminationMode::Off);
+        EXPECT_EQ(result->Effects.AmbientOcclusion, AmbientOcclusionMode::Off);
+        EXPECT_EQ(result->Effects.Reflections, ReflectionMode::Off);
+        EXPECT_FALSE(result->Effects.WaterReflections);
+        EXPECT_TRUE(result->TexturePacks.Azahar.LoadCustomTextures);
+        EXPECT_TRUE(result->SgsrEdgeDir);
+        EXPECT_EQ(result->FrameRate, FrameRateMode::Interpolated2x);
+        EXPECT_EQ(result->AntiAliasing, AntiAliasingMode::Smaa1x);
+        EXPECT_EQ(result->TextureMipLimit, 4U);
+    }
+    saved.Preset = GraphicsPreset::Authentic;
+    EXPECT_FALSE(GraphicsSettingsService::Validate(saved, capabilities).Value.Effects.WaterReflections);
+}
+#endif
+
 // Track the preset's intended differences from the desktop profile.
 TEST(Oot3dGraphicsSettingsPersistence, EnhancedForMobileUsesTheMobileProfile) {
     using namespace Fast::Extension;

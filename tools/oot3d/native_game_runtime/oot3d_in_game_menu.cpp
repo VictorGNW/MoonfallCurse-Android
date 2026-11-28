@@ -510,12 +510,11 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     row.Modified = [this] { return mGraphics.InternalResolutionScale != mBaseline.InternalResolutionScale; };
     tab.Rows.push_back(std::move(row));
   }
-  std::vector<std::string> aaChoices{"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA"};
-  std::string aaHelp = "FXAA and SMAA smooth edges after rendering, MSAA samples the geometry, "
-                       "and Temporal AA accumulates frames.";
+  std::vector<std::string> aaChoices{"Off", "FXAA", "SMAA 1x (High)"};
+  std::string aaHelp = "FXAA and SMAA smooth edges after rendering.";
   if (!mobile) {
-    aaChoices.emplace_back("NRI Upscaler");
-    aaHelp += " NRI Upscaler renders smaller and reconstructs the image.";
+    aaChoices.insert(aaChoices.end(), {"MSAA", "Temporal AA", "NRI Upscaler"});
+    aaHelp += " MSAA samples geometry, Temporal AA accumulates frames, and NRI Upscaler reconstructs a smaller image.";
   }
   tab.Rows.push_back(graphicsChoice(
       "Anti-aliasing", std::move(aaHelp), std::move(aaChoices),
@@ -542,13 +541,29 @@ void InGameMenu::BuildVideoTab(Menu::Document &document) {
     quality.UnavailableReason = "Choose NRI Upscaler as anti-aliasing first.";
     tab.Rows.push_back(std::move(quality));
   }
-  tab.Rows.push_back(graphicsChoice(
-      "Anisotropic filtering",
-      "Keeps textures sharp on surfaces seen at a slant (floors, roads, distant ground), the game's own textures "
-      "and texture packs alike.",
-      {"Off", "2x", "4x", "8x", "16x"},
-      [](const auto &s) { return std::countr_zero(static_cast<unsigned>(s.Anisotropy)); },
-      [](auto &s, int value) { s.Anisotropy = static_cast<uint8_t>(1U << value); }));
+  if (mobile) {
+    auto sgsr = graphicsToggle(
+        "SGSR v1 (Edge Direction)", "Upscales the reduced 3D scene before the HUD.",
+        [](const auto &s) { return s.SgsrEdgeDir; }, [](auto &s, bool enabled) { s.SgsrEdgeDir = enabled; });
+    sgsr.Available = [this] { return mCapabilities.Has(GraphicsCapability::SgsrEdgeDir); };
+    sgsr.UnavailableReason = "Requires the Vulkan scene composition path.";
+    tab.Rows.push_back(std::move(sgsr));
+    tab.Rows.push_back(graphicsToggle(
+        "Texture filtering", "Uses up to 8x anisotropy and four existing mip levels.",
+        [](const auto &s) { return s.Anisotropy > 1U || s.TextureMipLimit != 0U; },
+        [](auto &s, bool enabled) {
+          s.Anisotropy = enabled ? 8U : 1U;
+          s.TextureMipLimit = enabled ? 4U : 0U;
+        }));
+  } else {
+    tab.Rows.push_back(graphicsChoice(
+        "Anisotropic filtering",
+        "Keeps textures sharp on surfaces seen at a slant (floors, roads, distant ground), the game's own textures "
+        "and texture packs alike.",
+        {"Off", "2x", "4x", "8x", "16x"},
+        [](const auto &s) { return std::countr_zero(static_cast<unsigned>(s.Anisotropy)); },
+        [](auto &s, int value) { s.Anisotropy = static_cast<uint8_t>(1U << value); }));
+  }
   {
     Row row;
     row.Key = "Scene FOV";
@@ -638,51 +653,55 @@ void InGameMenu::BuildGraphicsTab(Menu::Document &document) {
     return row;
   };
 
-  tab.Rows.push_back(Heading("Lighting"));
-  tab.Rows.push_back(choice(
-      "Lighting model",
-      "Native keeps the original shading (PBR on supported pack materials). Modern lights every surface per pixel "
-      "from the scene lights, with PBR materials, shadows and global illumination. Scene lights, materials and "
-      "texture packs are set in F1.",
-      {"Native", "Modern"}, [](const auto &s) { return UsesFullSceneLighting(s.Effects.SurfaceLighting) ? 1 : 0; },
-      [this](auto &s, int value) {
-        s.Effects.SurfaceLighting = value == 1 ? SurfaceLightingMode::PerPixelPbr
-                                    : mCapabilities.Has(GraphicsCapability::NativeSurfaceLighting)
-                                        ? SurfaceLightingMode::NativePbr
-                                        : SurfaceLightingMode::Native;
-      }));
-  tab.Rows.push_back(choice(
-      "Global illumination", "Bounced light between surfaces: Brixelizer traces the scene's distance field, "
-                             "Screen-space GI gathers from the rendered image. Modern lighting only.",
-      {"Off", "Brixelizer GI", "Screen-space GI"},
-      [](const auto &s) { return static_cast<int>(s.Effects.GlobalIllumination.Mode); },
-      [](auto &s, int value) { s.Effects.GlobalIllumination.Mode = static_cast<GlobalIlluminationMode>(value); }));
-  tab.Rows.push_back(choice(
-      "Ambient occlusion", "Darkens creases and contact areas. Multiscale GTAO is the lightest, CACAO and MXAO are "
-                           "the most detailed; their fine parameters are in F1.",
-      {"Off", "Multiscale GTAO", "FidelityFX CACAO", "iMMERSE MXAO"},
-      [](const auto &s) { return static_cast<int>(s.Effects.AmbientOcclusion); },
-      [](auto &s, int value) { s.Effects.AmbientOcclusion = static_cast<AmbientOcclusionMode>(value); }));
-  {
-    auto row = choice("Shadows", "Virtual shadow maps cast the scene's sun or moon light from every actor and the "
-                                 "world. Resolution and bias are in F1 > Lighting.",
-                      {"Off", "Virtual Shadow Maps"},
-                      [](const auto &s) { return static_cast<int>(s.Effects.DirectionalShadows.Mode); },
-                      [](auto &s, int value) { s.Effects.DirectionalShadows.Mode = static_cast<DirectionalShadowMode>(value); });
-    row.Available = [this] { return UsesFullSceneLighting(mGraphics.Effects.SurfaceLighting); };
-    row.UnavailableReason = "Available with the Modern lighting model.";
-    tab.Rows.push_back(std::move(row));
+  constexpr bool mobile = kGraphicsPresetHost == GraphicsPresetHost::Mobile;
+  if (!mobile) {
+    tab.Rows.push_back(Heading("Lighting"));
+    tab.Rows.push_back(choice(
+        "Lighting model",
+        "Native keeps the original shading (PBR on supported pack materials). Modern lights every surface per pixel "
+        "from the scene lights, with PBR materials, shadows and global illumination. Scene lights, materials and "
+        "texture packs are set in F1.",
+        {"Native", "Modern"}, [](const auto &s) { return UsesFullSceneLighting(s.Effects.SurfaceLighting) ? 1 : 0; },
+        [this](auto &s, int value) {
+          s.Effects.SurfaceLighting = value == 1 ? SurfaceLightingMode::PerPixelPbr
+                                      : mCapabilities.Has(GraphicsCapability::NativeSurfaceLighting)
+                                          ? SurfaceLightingMode::NativePbr
+                                          : SurfaceLightingMode::Native;
+        }));
+    tab.Rows.push_back(choice(
+        "Global illumination", "Bounced light between surfaces: Brixelizer traces the scene's distance field, "
+                               "Screen-space GI gathers from the rendered image. Modern lighting only.",
+        {"Off", "Brixelizer GI", "Screen-space GI"},
+        [](const auto &s) { return static_cast<int>(s.Effects.GlobalIllumination.Mode); },
+        [](auto &s, int value) { s.Effects.GlobalIllumination.Mode = static_cast<GlobalIlluminationMode>(value); }));
+    tab.Rows.push_back(choice(
+        "Ambient occlusion", "Darkens creases and contact areas. Multiscale GTAO is the lightest, CACAO and MXAO are "
+                             "the most detailed; their fine parameters are in F1.",
+        {"Off", "Multiscale GTAO", "FidelityFX CACAO", "iMMERSE MXAO"},
+        [](const auto &s) { return static_cast<int>(s.Effects.AmbientOcclusion); },
+        [](auto &s, int value) { s.Effects.AmbientOcclusion = static_cast<AmbientOcclusionMode>(value); }));
+    {
+      auto row = choice("Shadows", "Virtual shadow maps cast the scene's sun or moon light from every actor and the "
+                                   "world. Resolution and bias are in F1 > Lighting.",
+                        {"Off", "Virtual Shadow Maps"},
+                        [](const auto &s) { return static_cast<int>(s.Effects.DirectionalShadows.Mode); },
+                        [](auto &s, int value) { s.Effects.DirectionalShadows.Mode = static_cast<DirectionalShadowMode>(value); });
+      row.Available = [this] { return UsesFullSceneLighting(mGraphics.Effects.SurfaceLighting); };
+      row.UnavailableReason = "Available with the Modern lighting model.";
+      tab.Rows.push_back(std::move(row));
+    }
+    tab.Rows.push_back(choice(
+        "Reflections", "Screen-space reflections on water and reflective materials: Hi-Z is the fast tracer, "
+                       "FidelityFX SSSR the filtered one. Water keeps its own reflections when Off.",
+        {"Off", "Hi-Z SSR", "FidelityFX SSSR"}, [](const auto &s) { return static_cast<int>(s.Effects.Reflections); },
+        [](auto &s, int value) { s.Effects.Reflections = static_cast<ReflectionMode>(value); }));
   }
-  tab.Rows.push_back(choice(
-      "Reflections", "Screen-space reflections on water and reflective materials: Hi-Z is the fast tracer, "
-                     "FidelityFX SSSR the filtered one. Water keeps its own reflections when Off.",
-      {"Off", "Hi-Z SSR", "FidelityFX SSSR"}, [](const auto &s) { return static_cast<int>(s.Effects.Reflections); },
-      [](auto &s, int value) { s.Effects.Reflections = static_cast<ReflectionMode>(value); }));
 
   tab.Rows.push_back(Heading("Style"));
   tab.Rows.push_back(choice(
-      "Toon", "Cel shading: the preview bands the lit image, the PICA material mode shades the materials "
-              "themselves. Bands, outlines and tints are in F1 > Lighting > Toon.",
+      "Toon", mobile ? "Cel shading. Bands, outlines and tints are in F1 > Style."
+                     : "Cel shading: the preview bands the lit image, the PICA material mode shades the materials "
+                       "themselves. Bands, outlines and tints are in F1 > Lighting > Toon.",
       {"Off", "Albedo-preserving preview", "PICA material toon"},
       [](const auto &s) { return static_cast<int>(s.Effects.Toon); },
       [](auto &s, int value) { s.Effects.Toon = static_cast<ToonMode>(value); }));

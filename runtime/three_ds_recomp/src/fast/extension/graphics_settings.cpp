@@ -76,6 +76,18 @@ void Correct(std::vector<GraphicsSettingsIssue>& issues, std::string field,
     issues.push_back({ std::move(field), std::move(message), true });
 }
 
+#if defined(__ANDROID__)
+void ApplyAndroidEffectsPolicy(EffectsSettings& effects) {
+    effects.SurfaceLighting = SurfaceLightingMode::Native;
+    effects.DirectionalShadows.Mode = DirectionalShadowMode::Off;
+    effects.PointShadows.Mode = PointShadowMode::Off;
+    effects.GlobalIllumination.Mode = GlobalIlluminationMode::Off;
+    effects.AmbientOcclusion = AmbientOcclusionMode::Off;
+    effects.Reflections = ReflectionMode::Off;
+    effects.WaterReflections = false;
+}
+#endif
+
 bool IsMsaaCount(uint8_t samples) {
     return samples == 1 || samples == 2 || samples == 4 || samples == 8;
 }
@@ -189,7 +201,16 @@ bool GraphicsSettingsValidation::Accepted() const {
 }
 
 GraphicsSettingsService::GraphicsSettingsService(GraphicsSettings initial)
-    : mCurrent(std::move(initial)), mLastKnownGood(mCurrent) {
+    : mCurrent(std::move(initial)) {
+#if defined(__ANDROID__)
+    ApplyAndroidEffectsPolicy(mCurrent.Effects);
+    if (mCurrent.AntiAliasing == AntiAliasingMode::Msaa || mCurrent.AntiAliasing == AntiAliasingMode::Taa)
+        mCurrent.AntiAliasing = AntiAliasingMode::Fxaa;
+    if (mCurrent.AntiAliasing == AntiAliasingMode::Upscaler)
+        mCurrent.AntiAliasing = AntiAliasingMode::Off;
+    mCurrent.MsaaSamples = 1;
+#endif
+    mLastKnownGood = mCurrent;
 }
 
 GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
@@ -234,6 +255,9 @@ GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
     } else if (preset == GraphicsPreset::Custom) {
         value.Preset = GraphicsPreset::Custom;
     }
+#if defined(__ANDROID__)
+    ApplyAndroidEffectsPolicy(value.Effects);
+#endif
     return value;
 }
 
@@ -360,6 +384,7 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         std::clamp(value.UpscalerSharpness, 0.0F, 1.0F);
     if (value.UpscalerDlssModel > DlssModel::Cnn)
         value.UpscalerDlssModel = DlssModel::Default;
+#if !defined(__ANDROID__)
     // The selectable models are Native (native shading, PBR only on supported
     // pack materials) and Modern (per-pixel + PBR). Per-pixel without PBR is
     // Modern without a pack; plain native shading remains the capability
@@ -375,6 +400,7 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         Correct(result.Issues, "Graphics.Effects.SurfaceLighting",
                 capabilities.Get(GraphicsCapability::NativeSurfaceLighting).Reason);
     }
+#endif
     value.Effects.AoQuality = std::min<uint8_t>(value.Effects.AoQuality, 1U);
     value.Effects.AoRadius = std::clamp(value.Effects.AoRadius, 0.05F, 100.0F);
     value.Effects.AoDetailRadius = std::isfinite(value.Effects.AoDetailRadius)
@@ -1080,6 +1106,9 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         value.Grass.Masks = std::move(grassMasks);
         value.Effects.ReflectionMaterials = std::move(reflectionMaterials);
     }
+#if defined(__ANDROID__)
+    ApplyAndroidEffectsPolicy(value.Effects);
+#endif
     result.Value = std::move(value);
     return result;
 }
