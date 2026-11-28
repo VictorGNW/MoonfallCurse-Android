@@ -500,23 +500,28 @@ GfxRenderingAPIVulkan::BufferAllocation GfxRenderingAPIVulkan::CreateBuffer(
     bool persistentlyMapped) {
     BufferAllocation buffer{};
     buffer.Size = size;
-    VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    CheckVk(vkCreateBuffer(mDevice, &bufferInfo, nullptr, &buffer.Buffer), "vkCreateBuffer");
-    VkMemoryRequirements requirements{};
-    vkGetBufferMemoryRequirements(mDevice, buffer.Buffer, &requirements);
-    VkMemoryAllocateInfo allocationInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-    allocationInfo.allocationSize = requirements.size;
-    allocationInfo.memoryTypeIndex = FindMemoryType(requirements.memoryTypeBits, properties);
-    CheckVk(vkAllocateMemory(mDevice, &allocationInfo, nullptr, &buffer.Memory),
-            "vkAllocateMemory(buffer)");
-    CheckVk(vkBindBufferMemory(mDevice, buffer.Buffer, buffer.Memory, 0),
-            "vkBindBufferMemory");
-    if (persistentlyMapped) {
-        CheckVk(vkMapMemory(mDevice, buffer.Memory, 0, size, 0, &buffer.Mapped),
-                "vkMapMemory(buffer)");
+    try {
+        VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        CheckVk(vkCreateBuffer(mDevice, &bufferInfo, nullptr, &buffer.Buffer), "vkCreateBuffer");
+        VkMemoryRequirements requirements{};
+        vkGetBufferMemoryRequirements(mDevice, buffer.Buffer, &requirements);
+        VkMemoryAllocateInfo allocationInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        allocationInfo.allocationSize = requirements.size;
+        allocationInfo.memoryTypeIndex = FindMemoryType(requirements.memoryTypeBits, properties);
+        CheckVk(vkAllocateMemory(mDevice, &allocationInfo, nullptr, &buffer.Memory),
+                "vkAllocateMemory(buffer)");
+        CheckVk(vkBindBufferMemory(mDevice, buffer.Buffer, buffer.Memory, 0),
+                "vkBindBufferMemory");
+        if (persistentlyMapped) {
+            CheckVk(vkMapMemory(mDevice, buffer.Memory, 0, size, 0, &buffer.Mapped),
+                    "vkMapMemory(buffer)");
+        }
+    } catch (...) {
+        DestroyBuffer(buffer);
+        throw;
     }
     return buffer;
 }
@@ -743,9 +748,11 @@ VkSamplerCreateInfo GfxRenderingAPIVulkan::BuildTextureSamplerInfo(
     samplerInfo.addressModeV = ToVulkanAddressMode(texture.SamplerState.WrapT);
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.mipLodBias = texture.SamplerState.LodBias;
-    const uint32_t highestUploadedMip = texture.UploadedMipLevels > 0
-                                            ? texture.UploadedMipLevels - 1
-                                            : 0;
+    uint32_t highestUploadedMip = texture.UploadedMipLevels > 0 ? texture.UploadedMipLevels - 1 : 0;
+    if (mTextureMipLimit > 0U) {
+        const uint32_t firstMip = std::min(texture.SamplerState.MinMipLevel, highestUploadedMip);
+        highestUploadedMip = std::min(highestUploadedMip, firstMip + mTextureMipLimit - 1U);
+    }
     samplerInfo.minLod = static_cast<float>(
         std::min(texture.SamplerState.MinMipLevel, highestUploadedMip));
     samplerInfo.maxLod = static_cast<float>(

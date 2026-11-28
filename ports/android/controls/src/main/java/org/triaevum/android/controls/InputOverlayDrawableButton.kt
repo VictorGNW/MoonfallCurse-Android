@@ -69,7 +69,14 @@ class InputOverlayDrawableButton(
      *
      * @return true if value was changed
      */
-    fun updateStatus(event: MotionEvent, pointerIndex: Int, hasActiveButtons: Boolean, overlay: InputOverlay): Boolean {
+    internal fun containsExpanded(x: Int, y: Int): Boolean {
+        val padding = bounds.width() * 6 / 100
+        return x >= bounds.left - padding && x < bounds.right + padding &&
+            y >= bounds.top - padding && y < bounds.bottom + padding
+    }
+
+    fun updateStatus(event: MotionEvent, pointerIndex: Int, hasActiveButtons: Boolean,
+                     overlay: InputOverlay, expandedHit: Boolean = false): Boolean {
         val buttonSliding = EmulationMenuSettings.buttonSlide
         val xPosition = event.getX(pointerIndex).toInt()
         val yPosition = event.getY(pointerIndex).toInt()
@@ -80,7 +87,7 @@ class InputOverlayDrawableButton(
         val isActionUp =
             motionEvent == MotionEvent.ACTION_UP || motionEvent == MotionEvent.ACTION_POINTER_UP
         if (isActionDown) {
-            if (trackId != -1 || !bounds.contains(xPosition, yPosition)) {
+            if (trackId != -1 || (!expandedHit && !overlay.containsButton(this, xPosition, yPosition))) {
                 return false
             }
             buttonDown(true, pointerId, overlay)
@@ -96,7 +103,7 @@ class InputOverlayDrawableButton(
 
         val isActionMoving = motionEvent == MotionEvent.ACTION_MOVE
         if (buttonSliding != ButtonSlidingMode.Disabled.int && isActionMoving) {
-            val inside = bounds.contains(xPosition, yPosition)
+            val inside = overlay.containsButton(this, xPosition, yPosition)
             if (pressedState) {
                 // button is already pressed
                 // check whether we moved out of the button area to update the state

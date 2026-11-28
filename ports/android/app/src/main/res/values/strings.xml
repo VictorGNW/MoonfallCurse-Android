@@ -210,4 +210,22 @@
     <string name="diagnostics_crash_message">The last session ended with: %1$s. A diagnostics report can help with an issue report; nothing is sent anywhere.</string>
     <string name="diagnostics_view">View report</string>
     <string name="diagnostics_dismiss">Dismiss</string>
+    <string name="forge_prewarm_pipelines">Prepare known shaders before playing</string>
+    <string name="forge_prewarm_pipelines_details">May reduce stutter when you first play. Installation takes longer, uses extra cache space, and may warm up the phone. Skip to install faster.</string>
+    <string name="forge_stage_percent">%1$d%%</string>
+    <string name="forge_stage_remaining">About %1$s left in this step</string>
+    <string name="forge_background_progress_hint">Continues in the background, even with the screen locked.</string>
+    <string name="forge_language_automatic">Automatic (device language)</string>
+    <string name="forge_language_automatic_button">Language: Automatic</string>
+    <string name="forge_disable_bcn_transcoding">Disable BCn transcoding if textures look incorrect</string>
+    <string name="forge_bcn_setting_failed">Could not save the BCn transcoding setting.</string>
+    <string name="forge_gpu_driver">GPU driver</string>
+    <string name="forge_driver_system">System driver selected. Import a trusted Mesa Turnip ZIP for a compatible Adreno GPU.</string>
+    <string name="forge_turnip_imported">Turnip imported. It will be tried on the next game launch. If it fails before the first frame, the next launch uses the system driver. Import ZIPs only from a source you trust.</string>
+    <string name="forge_turnip_use_bundled">Auto · bundled Turnip 26.3.0 (Adreno 600)</string>
+    <string name="forge_turnip_use_imported">Use imported Turnip</string>
+    <string name="forge_driver_next_start">The selected driver will apply the next time the game opens.</string>
+    <string name="forge_turnip_import">Import Turnip ZIP</string>
+    <string name="forge_driver_use_system">Use system driver</string>
+    <string name="forge_turnip_failed">Could not change the GPU driver.</string>
 </resources>

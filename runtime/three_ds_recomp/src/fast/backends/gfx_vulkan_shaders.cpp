@@ -107,12 +107,13 @@ void GfxRenderingAPIVulkan::ConfigureNativePicaAotShaders() {
     mNriInterop.Shaders().SetTitleArtifacts(
         [this](std::string_view source, Renderer::SpirvStage stage) -> std::span<const uint32_t> {
             if (stage != Renderer::SpirvStage::Fragment || !mPicaAotShaderPack.Loaded()) return {};
-            const auto binary = mPicaAotShaderPack.Find(Extension::PicaAotShaderStage::NriFragment, source);
+            const auto identity = Extension::IdentifyPicaAotShaderSource(source);
+            const auto binary = mPicaAotShaderPack.Find(Extension::PicaAotShaderStage::NriFragment, identity);
             if (!binary.empty()) {
                 ++mPicaAotShaderHits;
                 std::lock_guard lock(mPicaAotShaderLogMutex);
                 mPicaAotShaderHitIdentities.insert(
-                    {Extension::PicaAotShaderStage::NriFragment, Extension::IdentifyPicaAotShaderSource(source).Id});
+                    {Extension::PicaAotShaderStage::NriFragment, identity.Id});
             }
             return binary;
         });
@@ -132,6 +133,7 @@ void GfxRenderingAPIVulkan::ConfigureNativePicaAotShaders() {
     mNativeFragmentArtifactHits = 0;
     mNativeVertexArtifactHits = 0;
     mPicaAotShaderMisses = 0;
+    mNativeFragmentArtifactMisses = 0;
     mPicaAotShaderSummaryLogged = false;
     mPicaPipelinePrewarmSummaryLogged = false;
     mPicaPipelinePrewarmCreated = 0U;
@@ -304,7 +306,7 @@ void GfxRenderingAPIVulkan::FinishNativePicaAotShaders() {
     }
     if (!mPicaAotShaderSummaryLogged &&
         (mNativeVertexArtifactHits != 0U || mNativeFragmentArtifactHits != 0U || mPicaAotShaderPack.Loaded() || mPicaAotShaderHits != 0U ||
-         mPicaAotShaderMisses != 0U)) {
+         mPicaAotShaderMisses != 0U || mNativeFragmentArtifactMisses != 0U)) {
         SPDLOG_INFO("Native PICA AOT shader resolution: {} hits, {} misses",
                     mPicaAotShaderHits.load(), mPicaAotShaderMisses.load());
         size_t uniqueHits = 0, uniqueMisses = 0;
@@ -321,8 +323,9 @@ void GfxRenderingAPIVulkan::FinishNativePicaAotShaders() {
                      mPicaAotShaderStrict ? 1U : 0U,
                      mPicaAotShaderPack.EntryCount(), uniqueHits, uniqueMisses);
         mPicaAotShaderSummaryLogged = true;
-        std::fprintf(stderr, "TRIAEVUM_NATIVE_FRAGMENT_ARTIFACTS hits=%llu modules=%zu\n",
+        std::fprintf(stderr, "TRIAEVUM_NATIVE_FRAGMENT_ARTIFACTS hits=%llu misses=%llu modules=%zu\n",
                      static_cast<unsigned long long>(mNativeFragmentArtifactHits),
+                     static_cast<unsigned long long>(mNativeFragmentArtifactMisses),
                      Renderer3ds::NativeFragmentArtifacts().size() +
                          Extension::TemporalFragmentArtifacts().size() +
                          Extension::ToonFragmentArtifacts().size());
@@ -369,37 +372,39 @@ std::vector<uint32_t>
 GfxRenderingAPIVulkan::ResolveNativePicaShaderSpirv(
     std::string_view source, Extension::PicaAotShaderStage stage,
     bool vertexShader, const char* sourceName) {
-    if (!vertexShader && (stage == Extension::PicaAotShaderStage::Fragment ||
-                          stage == Extension::PicaAotShaderStage::NriFragment)) {
+    const bool fragmentArtifact = !vertexShader && (stage == Extension::PicaAotShaderStage::Fragment ||
+                                                    stage == Extension::PicaAotShaderStage::NriFragment);
+    Renderer3ds::PicaShaderSourceIdentity sourceIdentity{};
+    if (fragmentArtifact) {
+        sourceIdentity = Renderer3ds::IdentifyPicaShaderSource(source);
         // The same order device preparation resolves (Forge's prepared pipelines).
         const auto artifact = Extension::FindPicaBuiltInFragmentSpirv(
-            Renderer3ds::IdentifyPicaShaderSource(source), stage == Extension::PicaAotShaderStage::NriFragment);
+            sourceIdentity, stage == Extension::PicaAotShaderStage::NriFragment);
         if (!artifact.empty()) {
             ++mNativeFragmentArtifactHits;
             return {artifact.begin(), artifact.end()};
         }
-        const auto identity = Renderer3ds::IdentifyPicaShaderSource(source);
-        const auto stageName = Extension::PicaAotShaderStageName(stage);
-        std::fprintf(stderr, "TRIAEVUM_FRAGMENT_ARTIFACT_MISS stage=%.*s source=%llu bytes=%zu\n",
-                     static_cast<int>(stageName.size()), stageName.data(),
-                     static_cast<unsigned long long>(identity.Id), source.size());
+        // The title pack or the disk cache may still satisfy this request.
+        // Count it without synchronously logging each lookup on the render path.
+        ++mNativeFragmentArtifactMisses;
     }
     if (!mPicaAotShaderPack.Loaded()) {
-        return CompileShaderSpirv(std::string(source), vertexShader,
-                                  sourceName);
+        return CompileShaderSpirv(std::string(source), vertexShader, sourceName);
     }
-    const auto binary = mPicaAotShaderPack.Find(stage, source);
+    if (!fragmentArtifact) sourceIdentity = Renderer3ds::IdentifyPicaShaderSource(source);
+    const Extension::PicaAotShaderSourceIdentity identity{
+        sourceIdentity.Id, sourceIdentity.SecondaryHash, sourceIdentity.Size};
+    const auto binary = mPicaAotShaderPack.Find(stage, identity);
     if (!binary.empty()) {
         ++mPicaAotShaderHits;
         {
             std::lock_guard lock(mPicaAotShaderLogMutex);
-            mPicaAotShaderHitIdentities.insert({stage, Extension::IdentifyPicaAotShaderSource(source).Id});
+            mPicaAotShaderHitIdentities.insert({stage, identity.Id});
         }
         return {binary.begin(), binary.end()};
     }
 
     ++mPicaAotShaderMisses;
-    const auto identity = Extension::IdentifyPicaAotShaderSource(source);
     bool firstMiss = false;
     {
         std::lock_guard lock(mPicaAotShaderLogMutex);

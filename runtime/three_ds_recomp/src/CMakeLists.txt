@@ -170,6 +170,21 @@ endif()
 
 if(THREE_DS_RECOMP_ENABLE_VULKAN)
     target_sources(three_ds_recomp_runtime PRIVATE fast/renderer/shaderc_compiler.cpp)
+    if(ANDROID)
+        set(shaderc_fingerprint_dir "${CMAKE_CURRENT_BINARY_DIR}/shaderc-fingerprint")
+        set(shaderc_fingerprint_header "${shaderc_fingerprint_dir}/android_shaderc_fingerprint.h")
+        set(shaderc_fingerprint_script "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/android_shaderc_fingerprint.cmake")
+        add_custom_command(OUTPUT "${shaderc_fingerprint_header}"
+            COMMAND "${CMAKE_COMMAND}"
+                "-Darchive=$<TARGET_FILE:shaderc_combined>"
+                "-Doutput=${shaderc_fingerprint_header}"
+                -P "${shaderc_fingerprint_script}"
+            DEPENDS shaderc_combined "${shaderc_fingerprint_script}"
+            VERBATIM)
+        target_sources(three_ds_recomp_runtime PRIVATE "${shaderc_fingerprint_header}")
+        set_property(SOURCE fast/renderer/shaderc_compiler.cpp APPEND PROPERTY
+            INCLUDE_DIRECTORIES "${shaderc_fingerprint_dir}")
+    endif()
     # Screen-space diffuse GI: the title-neutral module and runtime pass
     # (docs/TRIAEVUM_SCREEN_SPACE_GI.md) behind the OOT3D provider
     # (fast/extension/screen_space_gi_provider.cpp).
@@ -194,6 +209,10 @@ if(THREE_DS_RECOMP_ENABLE_VULKAN)
     endforeach()
     triaevum_add_spirv_pack(three_ds_recomp_runtime fast/extension/pica_uber_fragment_binaries.cpp
         fast/extension/pica_native_lighting_uber.spvpack)
+    if(ANDROID)
+        triaevum_add_spirv_pack(three_ds_recomp_runtime fast/backends/gfx_vulkan_bcn_astc.cpp
+            fast/extension/third_party/bcn_layer/astc_encoder.spv)
+    endif()
     target_link_libraries(three_ds_recomp_runtime PRIVATE ${CMAKE_DL_LIBS})
     target_link_libraries(three_ds_recomp_runtime PUBLIC Vulkan::Vulkan PRIVATE three_ds_recomp_shaderc)
     if(THREE_DS_RECOMP_ENABLE_NRI)

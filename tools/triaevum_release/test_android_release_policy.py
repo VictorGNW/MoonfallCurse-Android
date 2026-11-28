@@ -39,7 +39,7 @@ def elf(align=0x4000, machine=183, debug=False) -> bytes:
 BADGING = {
     "oot3d": "package: name='org.triaevum.echoesoftime' versionCode='800202' versionName='0.8.0-beta.2'\n"
              "application-label:'Echoes of Time'\n",
-    "mm3d": "package: name='org.triaevum.moonfallcurse' versionCode='500101' versionName='0.5.0-alpha.1'\n"
+    "mm3d": "package: name='org.triaevum.moonfallcurse' versionCode='500102' versionName='0.5.0-alpha.2'\n"
             "application-label:'Moonfall Curse'\n",
 }
 
@@ -81,7 +81,7 @@ class FactsTests(unittest.TestCase):
         self.assertEqual((eot["application_id"], eot["label"], eot["flavor"], eot["version_code"]),
                          ("org.triaevum.echoesoftime", "Echoes of Time", "eot", 800202))
         self.assertEqual((mc["application_id"], mc["label"], mc["flavor"], mc["version_code"]),
-                         ("org.triaevum.moonfallcurse", "Moonfall Curse", "mc", 500101))
+                         ("org.triaevum.moonfallcurse", "Moonfall Curse", "mc", 500102))
         self.assertNotEqual(eot["application_id"], mc["application_id"])
 
     def test_negative_missing_or_inconsistent_fact(self):

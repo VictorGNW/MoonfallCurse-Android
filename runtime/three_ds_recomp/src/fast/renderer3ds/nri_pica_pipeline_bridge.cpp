@@ -441,19 +441,25 @@ bool NriPicaPipelineBridge::InitializePipelineCache(std::span<const uint8_t> dat
 #endif
 }
 
-std::vector<uint8_t> NriPicaPipelineBridge::GetPipelineCacheData() const {
+std::vector<uint8_t> NriPicaPipelineBridge::GetPipelineCacheData(uint64_t maximumBytes) const {
 #ifndef ENABLE_RENDERER3DS_NRI
+    (void)maximumBytes;
     return {};
 #else
     if (!Available() || mImpl->PipelineCache == nullptr) return {};
     auto* core = mImpl->Interop->Core();
     uint64_t size = 0;
-    // No size policy here: the store keeps or drops the cache (it outgrows the
-    // plain 64 MiB limit; capping it here once left it silently unsaved).
-    // Only an implausible size is refused before allocating it.
-    constexpr uint64_t kImplausibleBytes = 4ULL * kMaximumNriPipelineCacheBytes;
+    const uint64_t limit = maximumBytes == 0
+        ? kMaximumNriPipelineCacheBytes
+        : std::min(maximumBytes, kMaximumNriPipelineCacheBytes);
     if (core->GetPipelineCacheData(*mImpl->PipelineCache, nullptr, size) != nri::Result::SUCCESS ||
-        size == 0 || size > kImplausibleBytes) return {};
+        size == 0) return {};
+    if (size > limit) {
+        std::fprintf(stderr, "TRIAEVUM_NRI_PIPELINE_CACHE_%s result=deferred bytes=%llu limit=%llu\n",
+                     limit < kMaximumNriPipelineCacheBytes ? "FLUSH" : "SNAPSHOT",
+                     static_cast<unsigned long long>(size), static_cast<unsigned long long>(limit));
+        return {};
+    }
     std::vector<uint8_t> data(static_cast<size_t>(size));
     if (core->GetPipelineCacheData(*mImpl->PipelineCache, data.data(), size) != nri::Result::SUCCESS ||
         size == 0 || size > data.size()) return {};

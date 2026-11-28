@@ -1,0 +1,112 @@
+package org.triaevum.android;
+
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
+
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 29, manifest = Config.NONE)
+public class TurnipDriverTest {
+    @Rule public TemporaryFolder temporary = new TemporaryFolder();
+
+    @Test public void replacesTheDriverOnlyAfterSuccessfulValidation() throws Exception {
+        Path folder = temporary.newFolder().toPath();
+        byte[] driver = arm64Library();
+        importPackage(folder, Map.of("driver/vulkan.adreno.so", driver));
+        assertArrayEquals(driver, installedDriver(folder));
+
+        byte[] invalid = driver.clone();
+        invalid[18] = 62; // x86-64
+        assertThrows(IOException.class, () -> importPackage(folder, Map.of("vulkan.so", invalid)));
+        assertArrayEquals(driver, installedDriver(folder));
+
+        driver[64] = 1;
+        importPackage(folder, Map.of("replacement.so", driver));
+        assertArrayEquals(driver, installedDriver(folder));
+    }
+
+    @Test public void rejectsAmbiguousPackagesWithoutInstallingAnything() throws Exception {
+        Path folder = temporary.newFolder().toPath();
+        assertThrows(IOException.class, () -> importPackage(folder,
+            Map.of("vulkan1.so", arm64Library(), "vulkan2.so", arm64Library())));
+        assertFalse(Files.exists(folder.resolve("libturnip.so")));
+    }
+
+    @Test public void usesTheLibraryNamedByThePackageMetadata() throws Exception {
+        Path folder = temporary.newFolder().toPath();
+        byte[] driver = arm64Library();
+        importPackage(folder, Map.of(
+            "turnip/meta.json", "{\"libraryName\":\"vulkan.adreno.so\"}".getBytes(StandardCharsets.UTF_8),
+            "turnip/vulkan.adreno.so", driver,
+            "turnip/other.so", new byte[0]));
+        assertArrayEquals(driver, installedDriver(folder));
+    }
+
+    @Test public void interruptedStartupBlocksAnotherTrialUntilReimport() throws Exception {
+        Path folder = temporary.newFolder().toPath();
+        importPackage(folder, Map.of("vulkan.so", arm64Library()));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+        assertFalse(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+        assertThrows(IOException.class, () -> importPackage(folder, Map.of("broken.so", new byte[0])));
+        assertFalse(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+        importPackage(folder, Map.of("replacement.so", arm64Library()));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+    }
+
+    @Test public void defaultsToBundledAndKeepsImportedAndBundledRecoverySeparate() throws Exception {
+        Path folder = temporary.newFolder().toPath();
+        org.junit.Assert.assertEquals(TurnipDriver.Mode.BUNDLED, TurnipDriver.readMode(folder.toFile(), false));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.BUNDLED));
+        importPackage(folder, Map.of("vulkan.so", arm64Library()));
+        org.junit.Assert.assertEquals(TurnipDriver.Mode.IMPORTED, TurnipDriver.readMode(folder.toFile(), true));
+        assertTrue(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.IMPORTED));
+        assertFalse(TurnipDriver.beginTrial(folder.toFile(), TurnipDriver.Mode.BUNDLED));
+    }
+
+    private static byte[] installedDriver(Path folder) throws IOException {
+        return Files.readAllBytes(folder.resolve("libturnip.so"));
+    }
+
+    private static byte[] arm64Library() {
+        byte[] driver = new byte[65];
+        driver[0] = 0x7f;
+        driver[1] = 'E';
+        driver[2] = 'L';
+        driver[3] = 'F';
+        driver[4] = 2;
+        driver[5] = 1;
+        driver[16] = 3;
+        driver[18] = (byte) 183;
+        return driver;
+    }
+
+    private static void importPackage(Path folder, Map<String, byte[]> entries) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+                zip.putNextEntry(new ZipEntry(entry.getKey()));
+                zip.write(entry.getValue());
+                zip.closeEntry();
+            }
+        }
+        TurnipDriver.importZip(folder.toFile(), new ByteArrayInputStream(bytes.toByteArray()));
+    }
+}

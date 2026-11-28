@@ -2,6 +2,7 @@
 #include "fast/renderer/cache_file.h"
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -110,6 +111,26 @@ int main() {
         try { reader.Resolve("source", SpirvStage::Vertex, [] { return std::vector<uint32_t>{0x07230203}; }); }
         catch (const std::runtime_error&) { failed = true; }
         Check(failed && reader.Stats().CompilationFailures == 2);
+        // Paired PICA programs can request the same stage while it is cold.
+        SpirvCache shared;
+        shared.Configure(root.Path / "shared", "compiler");
+        std::barrier startTogether(2);
+        auto resolve = [&] {
+            startTogether.arrive_and_wait();
+            return shared.Resolve("shared vertex", SpirvStage::Vertex, [] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                return module;
+            });
+        };
+        std::vector<uint32_t> otherModule;
+        std::jthread peer([&] { otherModule = resolve(); });
+        const auto mainModule = resolve();
+        peer.join();
+        Check(mainModule == module && otherModule == module);
+        const auto sharedStats = shared.Stats();
+        Check(sharedStats.Requests == 2 && sharedStats.Compilations == 1 &&
+              sharedStats.Writes == 1 && sharedStats.Hits == 1);
+
         // Shared publication with concurrent writers/readers: no partial final file.
         const auto concurrent = root.Path / "concurrent.bin";
         const std::vector<uint8_t> first(65536, 17), second(65536, 29);

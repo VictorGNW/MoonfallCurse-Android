@@ -18,6 +18,21 @@ object EmulationMenuSettings {
                 .putBoolean("EmulationMenuSettings_JoystickRelCenter", value)
                 .apply()
         }
+    var expandedMainButtons: Boolean
+        get() = preferences.getBoolean("TriAevumExpandedMainButtons", false)
+        set(value) {
+            preferences.edit().putBoolean("TriAevumExpandedMainButtons", value).apply()
+        }
+
+    fun shortcut(id: Int): TouchShortcut {
+        val saved = preferences.getString("TriAevumTouchShortcut-$id", null)
+        return TouchShortcut.entries.firstOrNull { it.name == saved } ?: TouchShortcut.OFF
+    }
+
+    fun setShortcut(id: Int, action: TouchShortcut) {
+        preferences.edit().putString("TriAevumTouchShortcut-$id", action.name).apply()
+    }
+
     var dpadSlide: Boolean
         get() = preferences.getBoolean("EmulationMenuSettings_DpadSlideEnable", true)
         set(value) {

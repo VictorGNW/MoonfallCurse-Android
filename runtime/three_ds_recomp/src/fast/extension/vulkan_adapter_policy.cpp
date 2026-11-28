@@ -44,10 +44,11 @@ VulkanQueueTopologyPlan ResolveVulkanQueueTopology(
     uint32_t graphicsFamily, uint32_t presentFamily,
     uint32_t graphicsQueueCount, VulkanPresentDispatchMode mode,
     std::string_view videoDriver) {
-    // A separate present queue flashes on the qualified Wayland WSI, even with
-    // inline host dispatch. Keep rendering/presentation ordered on one queue;
-    // this adds no host fence or queue-idle wait and leaves other surfaces alone.
-    if (mode == VulkanPresentDispatchMode::Automatic && videoDriver == "wayland")
+    // A separate present queue flashes on Wayland. On Android, use the same
+    // compatibility path after release-image timeouts on a Mali driver.
+    // A shared queue orders rendering and presentation without a host wait.
+    if (mode == VulkanPresentDispatchMode::Automatic &&
+        (videoDriver == "wayland" || videoDriver == "Android" || videoDriver == "android"))
         mode = VulkanPresentDispatchMode::GraphicsQueue;
     VulkanQueueTopologyPlan plan;
     plan.GraphicsFamily = graphicsFamily;

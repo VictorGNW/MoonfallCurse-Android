@@ -43,6 +43,7 @@ struct NriPicaScanoutDesc {
     // physical surface, an offscreen boundary materializes a surface-domain
     // image a native consumer samples.
     bool OffscreenTarget = false;
+    std::optional<VkRect2D> MenuBackdropPicture;
 };
 
 class NriPicaScanoutPass final {
@@ -57,7 +58,7 @@ class NriPicaScanoutPass final {
     bool Configure(VkFormat targetFormat);
     // Offscreen target: the surface-domain image a native consumer samples. It
     // keeps its own pipeline so a boundary never disturbs scanout state.
-    bool ConfigureOffscreen(VkFormat targetFormat);
+    bool ConfigureOffscreen(VkFormat targetFormat, bool sgsrEdgeDir = false);
     bool Execute(const NriPicaScanoutDesc& desc,
                  const EffectPassBarrierPlan& barrierPlan);
     void ResetTargets();

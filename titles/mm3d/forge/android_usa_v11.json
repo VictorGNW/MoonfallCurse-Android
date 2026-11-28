@@ -1,0 +1,23 @@
+{
+  "id": "mm3d-usa-v1.1-6eec27b1",
+  "region": "USA v1.1",
+  "inputs": {
+    "code": {
+      "bytes": 5967872,
+      "sha256": "6eec27b1827eab2c87744ac38066d569ffe6fe75790b1eb3300bd91f5099038d"
+    },
+    "exheader": {
+      "bytes": 2048,
+      "sha256": "6e90d807a7df5ec16ffd7d46e8039dd0907dfa1deb23c52114312d5088217adf"
+    },
+    "romfs": {
+      "bytes": 650424320,
+      "sha256": "7b64a50a303eb4b9ec0939630d5e77b8e89a92ea129ea06f73b67d20a1ec024a"
+    }
+  },
+  "process": {
+    "base": 1048576,
+    "entrypoint": 1048576,
+    "executable_size": 5361664
+  }
+}

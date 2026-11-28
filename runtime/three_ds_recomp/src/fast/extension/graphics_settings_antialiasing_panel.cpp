@@ -8,12 +8,18 @@ namespace Fast::Extension {
 bool GraphicsSettingsPanel::DrawAntialiasingSettings(
     GraphicsSettings& settings, const GraphicsCapabilities& capabilities) {
     bool changed = false;
+#if defined(__ANDROID__)
+    ImGui::SeparatorText("Antialiasing");
+    const char* const modes[] = {"Off", "FXAA", "SMAA 1x (High)"};
+#else
     ImGui::SeparatorText("Antialiasing and upscaling");
     const char* const modes[] = {"Off", "FXAA", "SMAA 1x (High)", "MSAA", "Temporal AA", "NRI Upscaler"};
+#endif
     changed |= SettingsUi::ValidatedCombo<AntiAliasingMode>(
         "Mode", settings, capabilities, modes,
         [&](auto& value, auto mode) {
             value.AntiAliasing = mode;
+#if !defined(__ANDROID__)
             if (mode == AntiAliasingMode::Msaa && value.MsaaSamples < 2U)
                 value.MsaaSamples = 2U;
             if (mode == AntiAliasingMode::Upscaler) {
@@ -30,8 +36,10 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
                     }
                 }
             }
+#endif
         }, [](const auto& value) { return value.AntiAliasing; });
 
+#if !defined(__ANDROID__)
     if (settings.AntiAliasing == AntiAliasingMode::Msaa) {
         const char* const samples[] = {"2x", "4x", "8x"};
         changed |= SettingsUi::ValidatedCombo<int>(
@@ -75,6 +83,24 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
         if (settings.Upscaler == UpscalerProvider::Nis || settings.Upscaler == UpscalerProvider::Fsr)
             changed |= ImGui::SliderFloat("Sharpness", &settings.UpscalerSharpness, 0.0F, 1.0F, "%.2f");
     }
+#endif
+#if defined(__ANDROID__)
+    const bool sgsrAvailable = capabilities.Has(GraphicsCapability::SgsrEdgeDir);
+    ImGui::BeginDisabled(!sgsrAvailable);
+    changed |= ImGui::Checkbox("SGSR v1 (Edge Direction)", &settings.SgsrEdgeDir);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", sgsrAvailable ? "Upscales a reduced 3D scene before the HUD. Set the internal resolution below the output."
+                                             : "SGSR requires the Vulkan scene composition path.");
+    bool filtering = settings.Anisotropy > 1U || settings.TextureMipLimit != 0U;
+    if (ImGui::Checkbox("Texture filtering", &filtering)) {
+        settings.Anisotropy = filtering ? 8U : 1U;
+        settings.TextureMipLimit = filtering ? 4U : 0U;
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Up to 8x anisotropy and four existing mip levels when enabled.");
+#else
     const char* const anisotropy[] = {"Off", "2x", "4x", "8x", "16x"};
     changed |= SettingsUi::ValidatedCombo<int>(
         "Anisotropic filtering", settings, capabilities, anisotropy,
@@ -83,6 +109,7 @@ bool GraphicsSettingsPanel::DrawAntialiasingSettings(
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Keeps textures sharp on surfaces seen at a slant (floors, roads, distant ground), "
                           "the game's own textures and texture packs alike.");
+#endif
     return changed;
 }
 } // namespace Fast::Extension

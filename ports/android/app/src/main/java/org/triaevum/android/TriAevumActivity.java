@@ -30,7 +30,7 @@ public final class TriAevumActivity extends SDLActivity {
         if (config.isFile()) {
             try {
                 maximumShortEdge = new JSONObject(new String(Files.readAllBytes(config.toPath()), StandardCharsets.UTF_8))
-                    .getInt("maximum_surface_short_edge");
+                    .optInt("maximum_surface_short_edge", maximumShortEdge);
                 if (maximumShortEdge < 0) throw new IllegalArgumentException("Negative surface limit");
             } catch (Exception error) {
                 Log.w("TriAevum", "Invalid Android host config; using 720p surface limit", error);
@@ -45,6 +45,11 @@ public final class TriAevumActivity extends SDLActivity {
         StartupDiagnostics.beginGameSession(this);
         StartupDiagnostics.stage(this, "activity_created");
         applyDeveloperEnvironment();
+        try {
+            Os.setenv(BcnTranscoding.ENVIRONMENT_KEY, BcnTranscoding.isDisabled(this) ? "1" : "0", true);
+        } catch (android.system.ErrnoException error) {
+            Log.w("TriAevum", "Unable to apply BCn transcoding setting", error);
+        }
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (!mBrokenLibraries) {
@@ -55,6 +60,8 @@ public final class TriAevumActivity extends SDLActivity {
 
     @Override public void loadLibraries() {
         StartupDiagnostics.stage(this, "libraries_loading");
+        if (TurnipDriver.available(this))
+            StartupDiagnostics.stage(this, TurnipDriver.select(this));
         try {
             super.loadLibraries();
         } catch (RuntimeException | UnsatisfiedLinkError error) {
@@ -73,7 +80,7 @@ public final class TriAevumActivity extends SDLActivity {
     /** The touch controls above the game surface, the same size, without taking key focus. */
     private void attachTouchControls() {
         touchInput = new TouchOverlayInput();
-        touchAdapter = new AzaharInputAdapter(touchInput);
+        touchAdapter = touchInput.createAdapter();
         // The overlay reads its preferences through the bound host while it is built.
         OverlayHost.INSTANCE.bind(this, touchAdapter);
         touchOverlay = new InputOverlay(this, null);
@@ -87,7 +94,19 @@ public final class TriAevumActivity extends SDLActivity {
         mSurface.requestFocus();
     }
 
+    // Called from SDL's native frame loop when its target cadence changes.
+    public void updatePresentationRate(int hz) {
+        runOnUiThread(() -> {
+            if (!isDestroyed() && mSurface instanceof TriAevumSurface) {
+                ((TriAevumSurface) mSurface).setPresentationRate(hz);
+            }
+        });
+    }
+
     @Override protected void onPause() {
+        if (mSurface instanceof TriAevumSurface) {
+            ((TriAevumSurface) mSurface).setFrameRateHintActive(false);
+        }
         StartupDiagnostics.stage(this, "paused");
         // Leaving the game is a pause: the game's menu holds it until the player is back.
         if (!mBrokenLibraries) {
@@ -105,33 +124,20 @@ public final class TriAevumActivity extends SDLActivity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (mSurface instanceof TriAevumSurface) {
+            ((TriAevumSurface) mSurface).setFrameRateHintActive(true);
+        }
         StartupDiagnostics.stage(this, "resumed");
         if (touchInput != null) touchInput.resume();
     }
 
-    // A controller hides the touch controls (when the user wants that); a touch shows them.
-    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
-        if (touchInput != null && isController(event.getSource())) touchInput.controllerUsed();
-        return super.dispatchKeyEvent(event);
-    }
-
-    @Override public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) {
-        if (touchInput != null && isController(event.getSource())) touchInput.controllerUsed();
-        return super.dispatchGenericMotionEvent(event);
-    }
-
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent event) {
-        if (touchInput != null) touchInput.touched();
+        if (touchInput != null) touchInput.onScreenTouch(event.getActionMasked());
         // The window's touches (overlay and game surface) arrive as they happen,
         // not batched to the next display frame, for the rest of the gesture.
         if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
             getWindow().getDecorView().requestUnbufferedDispatch(event);
         return super.dispatchTouchEvent(event);
-    }
-
-    private static boolean isController(int source) {
-        return (source & android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD
-            || (source & android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK;
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {

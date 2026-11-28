@@ -83,6 +83,19 @@ JNIEXPORT void JNICALL Java_org_triaevum_android_NativeHostBridge_requestPause(J
 
 } // extern "C"
 
+void SetAndroidPresentationRate(uint32_t hz) noexcept {
+    auto* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr) return;
+    auto activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (activity == nullptr) return;
+    const auto type = env->GetObjectClass(activity);
+    const auto method = type == nullptr ? nullptr : env->GetMethodID(type, "updatePresentationRate", "(I)V");
+    if (method != nullptr) env->CallVoidMethod(activity, method, static_cast<jint>(hz));
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(type);
+    env->DeleteLocalRef(activity);
+}
+
 bool TakeAndroidPauseRequest() noexcept {
     return pauseRequested.exchange(false, std::memory_order_acq_rel);
 }

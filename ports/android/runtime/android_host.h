@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 void InitializeAndroidGameHost();
+void SetAndroidPresentationRate(uint32_t hz) noexcept;
 
 // The in-game menu's "Export saves" / "Share diagnostics" (InGameMenuHost::
 // OpenInstallerPage): records the installer page ("saves" or "diagnostics")

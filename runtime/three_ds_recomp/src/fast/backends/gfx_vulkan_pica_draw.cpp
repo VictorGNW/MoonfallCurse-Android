@@ -200,13 +200,14 @@ void GfxRenderingAPIVulkan::ExecuteNativePicaBeforeDrawAnchors(
             // The opted-in native overlay owns an output-density attachment.
             // Reconstruct the reduced scene FIRST; native blend/alpha/depth then
             // compose the UI directly over it, without changed-pixel inference.
-            if (mPresentationUpscaler && draw.Composition.PreserveNativeUiSampling &&
+            if ((mPresentationUpscaler || mPresentationSgsrEdgeDir) &&
+                draw.Composition.PreserveNativeUiSampling &&
                 mNativePicaSampleCount == VK_SAMPLE_COUNT_1_BIT &&
                 Extension::IsNativeTopScreenTarget({target.Key.Width, target.Key.Height})) {
                 GpuTextureCopySourceImport reconstructed;
                 std::string error;
                 if (!ComposeNativePicaSceneForCopy(target, draw.SubmissionId, reconstructed,
-                        &error, beforeUi, false, true))
+                        &error, beforeUi, mPresentationSgsrEdgeDir && fxaaBeforeUi, true))
                     throw std::runtime_error(error);
                 auto& ui = GetOrCreateNativePicaRenderTarget(draw, 0, 0, true);
                 EndNativePicaRenderPass();
@@ -2408,11 +2409,14 @@ bool GfxRenderingAPIVulkan::SubmitPicaDraw(
         }
         if (selectedPipeline == nullptr) {
             const auto completionStart = std::chrono::steady_clock::now();
+            Renderer3ds::SlowStepTrace preparationSteps("pica_preparation");
             AdoptNativePicaProgram(shaderIt->second, true);
+            preparationSteps.Mark("shader_program");
             selectedPipeline = &GetOrCreateNativePicaPipeline(
                 effectiveDraw, shaderIt->second, shaderVariant.Reactive,
                 shaderVariant.Domain, shaderVariant.RequestedFeatures,
                 shaderVariant.AppliedFeatures);
+            preparationSteps.Mark("device_pipeline");
             if (mPreparationQueue) {
                 ++mNativePicaPreparationCounters.CompletedDraws;
                 const double milliseconds = std::chrono::duration<double, std::milli>(
@@ -4127,7 +4131,8 @@ bool GfxRenderingAPIVulkan::SubmitPicaDraw(
             shadingRate = Renderer3ds::PicaVrs::DrawRate(
                 true, draw.DepthTestEnabled || draw.DepthWriteEnabled,
                 fragment.find("gl_FragDepth") != std::string_view::npos,
-                RunsDiscardingAlphaTest(draw) || fragment.find("discard") != std::string_view::npos);
+                RunsDiscardingAlphaTest(draw) || fragment.find("discard") != std::string_view::npos,
+                mNativePicaSampleCount);
         }
         nriDraw.ShadingRate = shadingRate;
         // Records the draw once per scissor part with `drawPipeline` (the

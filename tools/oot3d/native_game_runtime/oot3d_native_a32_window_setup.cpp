@@ -127,6 +127,9 @@ void NativeA32WindowSession::InstallProductCrashDiagnostics() {
 }
 
 void NativeA32WindowSession::Setup() {
+#if defined(__ANDROID__)
+  ThreeDsRecomp::Input::OverlayTouchAnchors().SetZoraTouchArt(false);
+#endif
   if (launch.Host.Renderer != "opengl" &&
       launch.Host.Renderer != "nri" &&
       launch.Host.Renderer != "vulkan") {
@@ -245,6 +248,12 @@ void NativeA32WindowSession::Setup() {
       Oot3dNativeGame::DetectGameLanguages(manifest->RomFsImagePath,
           manifest->RomFsImageOffset, manifest->RomFsImageSize, titleAdapter));
   hostConfig.SystemLanguage = languageSettings->SystemId();
+  // The USA cartridge uses the same executable as EUR but selects different
+  // RomFS paths through the emulated CFG region.
+  if (titleAdapter == Oot3dNativeGame::TitleAdapter::Mm3d &&
+      manifest->ProgramId == 0x0004000000125500ULL) {
+    hostConfig.SystemRegion = 1; // CTR CFG North America
+  }
   if (!launch.UiTexturePackDirectory.empty()) {
     // Forge's UI texture pack beneath the user's pack: the boot language's
     // folders, then the language-neutral textures.

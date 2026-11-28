@@ -1189,14 +1189,14 @@ void GfxRenderingAPIVulkan::RetireGpuTextureCopySurfacesForTargetReset() {
     // it once the guest no longer owns it.
     std::vector<uint64_t> retired;
     for (const auto& [identity, surface] : mGpuTextureCopySurfaces) {
-        if (!surface.GuestOwner || surface.GuestOwner.use_count() == 1) {
+        const bool pinned = mGpuTextureCopyPinsDeclared &&
+            mGpuTextureCopyPins.contains({surface.RenderTargetNamespace, surface.CompletionId});
+        if (!pinned && (!surface.GuestOwner || surface.GuestOwner.use_count() == 1)) {
             retired.push_back(identity);
         }
     }
     for (const auto identity : retired) DestroyGpuTextureCopySurface(identity);
     mHandledNativePicaTextureCopies.clear();
-    mGpuTextureCopyPins.clear();
-    mGpuTextureCopyPinsDeclared = false;
 }
 
 namespace {

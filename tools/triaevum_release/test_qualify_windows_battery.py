@@ -116,15 +116,17 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(command[command.index("--save-data") + 1], "X:/shared/savedata")
 
     def test_pass_objects_replace_item_keys_and_inputs_resolve_in_the_repository(self):
+        repository = Path.cwd() / "repo"
+        absolute_timeline = str(repository.parent / "b.json")
         item = {"name": "S", "frames": 10, "timeline": "a.json", "cache_passes": [
-            "cold", {"name": "load", "checkpoint": "", "timeline": "X:/b.json", "frames": 20}]}
+            "cold", {"name": "load", "checkpoint": "", "timeline": absolute_timeline, "frames": 20}]}
         (cold, cold_item), (load, load_item) = scenario_passes(item)
         self.assertEqual((cold, cold_item["frames"], load, load_item["frames"]), ("cold", 10, "load", 20))
-        self.assertEqual(load_item["timeline"], "X:/b.json")
-        resolved = resolve_scenario_paths(dict(cold_item, save_data_seed="seeds/a"), Path("X:/repo"))
-        self.assertEqual(Path(resolved["timeline"]), Path("X:/repo/a.json"))
-        self.assertEqual(Path(resolved["save_data_seed"]), Path("X:/repo/seeds/a"))
-        self.assertEqual(resolve_scenario_paths(load_item, Path("X:/repo"))["timeline"], "X:/b.json")
+        self.assertEqual(load_item["timeline"], absolute_timeline)
+        resolved = resolve_scenario_paths(dict(cold_item, save_data_seed="seeds/a"), repository)
+        self.assertEqual(Path(resolved["timeline"]), repository / "a.json")
+        self.assertEqual(Path(resolved["save_data_seed"]), repository / "seeds/a")
+        self.assertEqual(resolve_scenario_paths(load_item, repository)["timeline"], absolute_timeline)
 
     def test_evaluation_turns_every_expectation_into_a_check(self):
         with tempfile.TemporaryDirectory() as temporary:

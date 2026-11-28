@@ -116,17 +116,47 @@ using Renderer3ds::kMaximumNriPipelineCacheBytes;
 // fast/renderer3ds/title_shader_preparation.h). Empty without a cache
 // directory or with an invalid namespace: the cache then stays in memory.
 std::filesystem::path VulkanPipelineCachePath(bool nri = false) {
-    const auto directory = VulkanShaderCacheDirectory();
+    auto directory = VulkanShaderCacheDirectory();
+#if defined(__ANDROID__)
+    // Preserve Forge's stock cache when switching drivers. Existing header
+    // checks still reject blobs from incompatible Mesa builds.
+    if (!directory.empty() && std::getenv("TRIAEVUM_ANDROID_TURNIP_LOADER"))
+        directory /= "turnip";
+#endif
     const auto filename = Renderer3ds::TitlePipelineCacheFilename(
         nri ? Renderer3ds::kNriPipelineCacheFilename : "pipeline_cache.bin",
         Renderer3ds::InstalledTitleShaderPreparation().PipelineCacheNamespace);
     return directory.empty() || filename.empty() ? std::filesystem::path{} : directory / filename;
 }
 
+bool LoadTitlePipelineCache(bool nri, const VulkanPipelineCacheHeader& expected,
+                            std::vector<uint8_t>& data) {
+    const auto path = VulkanPipelineCachePath(nri);
+    const auto maximumBytes = nri ? kMaximumNriPipelineCacheBytes : Renderer3ds::kMaximumPipelineCacheBytes;
+#if defined(__ANDROID__)
+    const auto start = std::chrono::steady_clock::now();
+#endif
+    const bool loaded = LoadPipelineCacheData(path, expected, data, maximumBytes);
+#if defined(__ANDROID__)
+    const auto milliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    std::fprintf(stderr, "TRIAEVUM_PIPELINE_CACHE_LOAD nri=%u loaded=%u bytes=%zu ms=%.1f file=%s\n",
+                 unsigned(nri), unsigned(loaded), data.size(), milliseconds, path.filename().string().c_str());
+#endif
+    return loaded;
+}
+
+struct VulkanCallError : std::runtime_error {
+    VulkanCallError(VkResult result, const char* operation)
+        : std::runtime_error(std::string(operation) + " failed with VkResult " +
+                             std::to_string(static_cast<int>(result))),
+          Result(result) {}
+    VkResult Result;
+};
+
 void CheckVk(VkResult result, const char* operation) {
     if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(operation) + " failed with VkResult " +
-                                 std::to_string(static_cast<int>(result)));
+        throw VulkanCallError(result, operation);
     }
 }
 

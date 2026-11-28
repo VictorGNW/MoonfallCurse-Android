@@ -13,6 +13,7 @@
 #include "mm3d_lighting_hook_sites.h"
 #include "mm3d_pica_composition.h"
 #include "mm3d_restoration.h"
+#include "mm3d_touch_player_form.h"
 #include "mm3d_scene_environment.h"
 #include "mm3d_scene_environment_profile.h"
 #include "mm3d_single_screen.h"
@@ -61,6 +62,9 @@ namespace {
 class Mm3dTitleSession final : public TitleSession, public Oot3dPicaCommandListCompositionProvider {
 public:
   const char *GameName() const override { return "Majora's Mask 3D"; }
+  bool UsesZoraTouchArt(oot3d::recomp::a32::MemoryBus& memory) const override {
+    return Mm3dPlayerIsZora(memory);
+  }
   const Fast::WindowIconImage *WindowIcon() const override { return &Mm3dWindowIcon(); }
   Oot3dPicaCommandListCompositionProvider *CompositionProvider() override { return this; }
   bool TakeCommandListCompositionSpans(uint32_t address,uint32_t bytes,

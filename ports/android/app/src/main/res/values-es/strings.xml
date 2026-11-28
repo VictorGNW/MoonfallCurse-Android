@@ -210,4 +210,11 @@
     <string name="diagnostics_crash_message">La última sesión terminó con: %1$s. Un informe de diagnóstico puede ayudar en un informe de errores; no se envía nada a ningún sitio.</string>
     <string name="diagnostics_view">Ver informe</string>
     <string name="diagnostics_dismiss">Descartar</string>
+    <string name="forge_prewarm_pipelines">Preparar los shaders conocidos antes de jugar</string>
+    <string name="forge_prewarm_pipelines_details">Puede reducir los tirones al empezar a jugar. La instalación tarda más, ocupa más espacio de caché y puede calentar el dispositivo. Omite este paso para instalar más rápido.</string>
+    <string name="forge_stage_percent">%1$d%%</string>
+    <string name="forge_stage_remaining">Quedan unos %1$s en este paso</string>
+    <string name="forge_background_progress_hint">Continúa en segundo plano, incluso con la pantalla bloqueada.</string>
+    <string name="forge_language_automatic">Automático (idioma del dispositivo)</string>
+    <string name="forge_language_automatic_button">Idioma: Automático</string>
 </resources>

@@ -5062,8 +5062,9 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     }
 }
 
-void Interpreter::EndFrame() {
+void Interpreter::EndFrame(const std::function<void()>& beforePresent) {
     mRapi->EndFrame();
+    if (beforePresent) beforePresent();
     mWapi->SwapBuffersBegin();
     mRapi->FinishRender();
     mWapi->SwapBuffersEnd();

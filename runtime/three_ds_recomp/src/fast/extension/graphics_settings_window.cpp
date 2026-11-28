@@ -260,7 +260,9 @@ void GraphicsSettingsPanel::Draw() {
     // tabs of those names; every other group (or ungrouped tab) is a
     // top-level tab, in the order it was first installed.
     std::vector<std::shared_ptr<GraphicsSettingsPanelTab>> displayTabs;
+#if !defined(__ANDROID__)
     std::vector<std::shared_ptr<GraphicsSettingsPanelTab>> lightingTabs;
+#endif
     std::vector<std::pair<std::string, std::vector<std::shared_ptr<GraphicsSettingsPanelTab>>>> groups;
     for (const auto& tab : SnapshotPanelTabs()) {
         const char* group = tab->Group();
@@ -269,7 +271,9 @@ void GraphicsSettingsPanel::Draw() {
             continue;
         }
         if (group != nullptr && std::string_view(group) == kLightingSettingsGroup) {
+#if !defined(__ANDROID__)
             lightingTabs.push_back(tab);
+#endif
             continue;
         }
         const std::string name = group != nullptr ? group : tab->Label();
@@ -286,6 +290,7 @@ void GraphicsSettingsPanel::Draw() {
         tab->Draw();
         ImGui::PopID();
     };
+#if !defined(__ANDROID__)
     // An unsaved preview (the scene lights before their Save) is marked on its
     // tab and its group, and named above the tabs, wherever F1 is (#68).
     const bool lightingPreview = std::any_of(lightingTabs.begin(), lightingTabs.end(),
@@ -296,6 +301,7 @@ void GraphicsSettingsPanel::Draw() {
                            kUnsavedPreviewMarker);
         ImGui::PopStyleColor();
     }
+#endif
     if (ImGui::BeginTabBar("##Oot3dSettingsTabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
         if (ImGui::BeginTabItem("Display")) {
             // The renderer's sections, then the application's below them.
@@ -307,19 +313,35 @@ void GraphicsSettingsPanel::Draw() {
             ImGui::EndChild();
             ImGui::EndTabItem();
         }
+#if defined(__ANDROID__)
+        if (ImGui::BeginTabItem("Style")) {
+            DrawSettingsPage("##StyleContent", {&GraphicsSettingsPanel::DrawToonSettings});
+            ImGui::EndTabItem();
+        }
+#else
         if (ImGui::BeginTabItem("Lighting", nullptr,
                                 lightingPreview ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None)) {
             DrawLightingTab(lightingTabs);
             ImGui::EndTabItem();
         }
+#endif
         if (!nativeRequired && ImGui::BeginTabItem("Grass")) {
             DrawGrassSettings();
             ImGui::EndTabItem();
         }
+#if defined(__ANDROID__)
+        if (ImGui::BeginTabItem("Texture packs")) {
+            ImGui::BeginChild("##TextureContent");
+            DrawTextureSettings();
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+#else
         if (ImGui::BeginTabItem("Materials")) {
             DrawMaterialsTab();
             ImGui::EndTabItem();
         }
+#endif
         // A developer lab tab request; product builds have none.
         std::string requested;
 #if defined(TRIAEVUM_RENDERER_DEVELOPER_TOOLS)
@@ -386,10 +408,14 @@ void GraphicsSettingsPanel::DrawTextureSettings() {
 void GraphicsSettingsPanel::DrawPresetSelector() {
     auto& runtime = GraphicsSettingsRuntime::Instance();
     auto settings = runtime.Snapshot();
-    const auto userPresets = runtime.UserPresetNames();
-    const auto activeUserPreset = runtime.ActiveUserPreset();
+    const bool mobile = mPresetHost == GraphicsPresetHost::Mobile;
+    const auto offered = BuiltInGraphicsPresets(mPresetHost);
+    const auto activeUserPreset = mobile ? std::string{} : runtime.ActiveUserPreset();
     const bool custom = settings.Preset == GraphicsPreset::Custom;
-    const std::string shown = !custom ? GraphicsPresetDisplayName(settings.Preset)
+    const bool showBuiltIn = mobile
+        ? GraphicsPresetChoiceIndex(mPresetHost, settings.Preset) < static_cast<int>(offered.size())
+        : !custom;
+    const std::string shown = showBuiltIn ? GraphicsPresetDisplayName(settings.Preset)
                               : !activeUserPreset.empty() ? activeUserPreset : "Custom";
     const auto applyBuiltIn = [&](GraphicsPreset preset) {
         settings = GraphicsSettingsService::PresetForCurrent(preset, settings);
@@ -398,27 +424,30 @@ void GraphicsSettingsPanel::DrawPresetSelector() {
         mOutputResolutionEditing = false;
     };
     if (ImGui::BeginCombo("Graphics preset", shown.c_str())) {
-        for (const auto preset : BuiltInGraphicsPresets(mPresetHost)) {
+        for (const auto preset : offered) {
             if (ImGui::Selectable(GraphicsPresetDisplayName(preset), settings.Preset == preset)) applyBuiltIn(preset);
         }
-        if (!userPresets.empty()) ImGui::SeparatorText("Your presets");
-        ImGui::PushID("UserPresets");
-        for (const auto& name : userPresets) {
-            if (!ImGui::Selectable(name.c_str(), custom && name == activeUserPreset)) continue;
-            const auto change = runtime.LoadUserPreset(name);
-            mRendererStatus = change.Message;
-            mPresetStatus = change.Message;
-            mPresetStatusFailed = !change.Succeeded;
-            mPresetPendingDelete.clear();
-            mRenderScaleEditing = false;
-            mOutputResolutionEditing = false;
+        if (!mobile) {
+            const auto userPresets = runtime.UserPresetNames();
+            if (!userPresets.empty()) ImGui::SeparatorText("Your presets");
+            ImGui::PushID("UserPresets");
+            for (const auto& name : userPresets) {
+                if (!ImGui::Selectable(name.c_str(), custom && name == activeUserPreset)) continue;
+                const auto change = runtime.LoadUserPreset(name);
+                mRendererStatus = change.Message;
+                mPresetStatus = change.Message;
+                mPresetStatusFailed = !change.Succeeded;
+                mPresetPendingDelete.clear();
+                mRenderScaleEditing = false;
+                mOutputResolutionEditing = false;
+            }
+            ImGui::PopID();
+            ImGui::Separator();
+            if (ImGui::Selectable("Custom", custom && activeUserPreset.empty())) applyBuiltIn(GraphicsPreset::Custom);
         }
-        ImGui::PopID();
-        ImGui::Separator();
-        if (ImGui::Selectable("Custom", custom && activeUserPreset.empty())) applyBuiltIn(GraphicsPreset::Custom);
         ImGui::EndCombo();
     }
-    DrawUserPresetControls(activeUserPreset);
+    if (!mobile) DrawUserPresetControls(activeUserPreset);
     if (!mRendererStatus.empty() && ImGui::TreeNode("Last change")) {
         ImGui::TextWrapped("%s", mRendererStatus.c_str());
         ImGui::TreePop();

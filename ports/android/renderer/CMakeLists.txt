@@ -23,3 +23,8 @@ target_link_libraries(triaevum_android_renderer_link_probe PRIVATE three_ds_reco
 target_compile_definitions(triaevum_android_renderer_link_probe PRIVATE
     $<TARGET_PROPERTY:three_ds_recomp_runtime,COMPILE_DEFINITIONS>)
 target_link_options(triaevum_android_renderer_link_probe PRIVATE -Wl,--no-undefined)
+
+# The link probe uses the same Vulkan forwarding as the product. This checks
+# Turnip's wrappers and hook libraries without building an APK or title assets.
+include(../runtime/turnip.cmake)
+triaevum_enable_turnip(triaevum_android_renderer_link_probe)

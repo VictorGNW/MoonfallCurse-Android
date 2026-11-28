@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -46,6 +47,8 @@ class SpirvCache {
                SpirvStage stage, const std::vector<uint32_t>& words);
     std::filesystem::path mDirectory;
     std::string mCompilerContract, mLastWriteError;
+    // Bound synchronization storage independently of the number of shaders.
+    std::array<std::mutex, 64> mEntryLocks;
     mutable std::mutex mStatsMutex;
     SpirvCacheStats mStats;
 };

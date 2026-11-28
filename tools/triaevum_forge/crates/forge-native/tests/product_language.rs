@@ -54,14 +54,13 @@ fn rejects_old_host_missing_features_and_wrong_commit() {
     product::validate_product_info(&info, "").unwrap();
 }
 
-/// Android's runtime publishes Enhanced for Mobile at 30 fps; a desktop runtime
-/// must keep publishing Enhanced at x2, and neither passes as the other.
+/// The two hosts publish different presets, both at interpolation x2.
 #[test]
 fn defaults_follow_the_host() {
     use product::{validate_product_info_for, ProductDefaults};
     let desktop = fixture_product();
     let mut android = fixture_product();
-    android["default_config"]["Graphics"] = json!({"Preset": "EnhancedForMobile", "FrameRate": {"Mode": "Original30"}});
+    android["default_config"]["Graphics"] = json!({"Preset": "EnhancedForMobile", "FrameRate": {"Mode": "Interpolated2x"}});
 
     validate_product_info_for(&desktop, "", ProductDefaults::Desktop).unwrap();
     validate_product_info_for(&android, "", ProductDefaults::Android).unwrap();
@@ -71,9 +70,9 @@ fn defaults_follow_the_host() {
     assert_eq!(error.message, "Runtime defaults do not select the EnhancedForMobile preset");
 
     let mut wrong_rate = android.clone();
-    wrong_rate["default_config"]["Graphics"]["FrameRate"]["Mode"] = json!("Interpolated2x");
+    wrong_rate["default_config"]["Graphics"]["FrameRate"]["Mode"] = json!("Original30");
     let error = validate_product_info_for(&wrong_rate, "", ProductDefaults::Android).unwrap_err();
-    assert_eq!(error.message, "Runtime defaults do not keep the original 30 fps");
+    assert_eq!(error.message, "Runtime defaults do not enable visual interpolation x2");
 }
 
 #[test]

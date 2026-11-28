@@ -454,6 +454,10 @@ VersionedGraphicsSettings GraphicsSettingsRuntime::SnapshotForRendering() const 
     std::scoped_lock lock(mMutex);
     VersionedGraphicsSettings result{mService.Current(), mRevision};
     mNativePresentation.Apply(result.Value);
+    if (result.Value.Preset == GraphicsPreset::EnhancedForMobile &&
+        result.Value.AntiAliasing == AntiAliasingMode::Smaa1x &&
+        !mCapabilities.Has(GraphicsCapability::Smaa1x))
+        result.Value.AntiAliasing = AntiAliasingMode::Fxaa;
     if (!UsesFullSceneLighting(result.Value.Effects.SurfaceLighting)) {
         result.Value.Effects.DirectionalShadows.Mode = DirectionalShadowMode::Off;
         result.Value.Effects.PointShadows.Mode = PointShadowMode::Off;

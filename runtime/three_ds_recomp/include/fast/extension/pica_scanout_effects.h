@@ -10,6 +10,9 @@
 
 namespace Fast::Extension {
 
+inline constexpr uint32_t kPicaScanoutSgsrEdgeDir = 3U;
+inline constexpr uint32_t kPicaScanoutFxaaSgsrEdgeDir = 4U;
+
 struct PicaScanoutPushConstants {
     uint32_t FlipY = 0;
     uint32_t AaMode = 0;
@@ -44,6 +47,18 @@ struct PicaScanoutPushConstants {
 };
 
 static_assert(sizeof(PicaScanoutPushConstants) == 128U);
+
+// A separate draw using the scanout pipeline. Projection constants are unused
+// in this mode and carry the window-space bounds of the picture to skip.
+inline PicaScanoutPushConstants PicaMenuBackdropConstants(
+    PicaScanoutPushConstants scanout, float left, float top, float right, float bottom) {
+    scanout.AaMode = 2U;
+    scanout.ProjectionOffsetX = left;
+    scanout.ProjectionOffsetY = top;
+    scanout.ProjectionScaleX = right;
+    scanout.ProjectionScaleY = bottom;
+    return scanout;
+}
 
 struct PicaScanoutPolicyInput {
     uint32_t TransferFlags = 0;
@@ -81,6 +96,7 @@ enum class PicaScanoutOrientation : uint8_t {
     bool separateSampler = false,
     std::optional<int> diagnosticMode = std::nullopt,
     PicaScanoutOrientation orientation =
-        PicaScanoutOrientation::PhysicalScreen);
+        PicaScanoutOrientation::PhysicalScreen,
+    bool includeSgsrEdgeDir = false);
 
 } // namespace Fast::Extension

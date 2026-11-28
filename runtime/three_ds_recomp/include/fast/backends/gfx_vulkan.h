@@ -106,6 +106,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <compare>
 #include <condition_variable>
 #include <cstdint>
@@ -326,6 +327,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     void SetPresentationSettingsHeld(bool held) override {
         mPresentationSettingsHeld = held;
     }
+    void SetMenuBackdropVisible(bool visible) override { mMenuBackdropVisible = visible; }
     bool PublishSceneView(
         const Extension::TitleSceneViewSubmission& view) override;
     bool ResetTitleState(std::string* error = nullptr) override;
@@ -514,6 +516,10 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
         // Vertex arenas replaced mid-frame by EnsureFrameVertexCapacity;
         // recorded draws still read them until the frame's fence completes.
         std::vector<BufferAllocation> RetiredVertexBuffers;
+#ifdef __ANDROID__
+        VkDescriptorPool AstcDescriptorPool = VK_NULL_HANDLE;
+        std::vector<BufferAllocation> RetiredAstcBuffers;
+#endif
     };
 
     struct CachedVertexBuffer {
@@ -1060,7 +1066,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     void DestroyTexture(TextureRecord& texture);
     void DestroyBuffer(BufferAllocation& buffer);
     void RecreateSwapchain();
-    bool SwapchainSurfaceChanged() const;
+    bool SwapchainSurfaceChanged();
 #if defined(__ANDROID__)
     // Android surface loss (gfx_vulkan_android_surface.cpp): the Activity's
     // window goes away in the background and comes back as a new one. A lost
@@ -1271,6 +1277,14 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
                                       uint32_t mipLevels, VkFormat format,
                                       bool storageView = false,
                                       std::span<const uint8_t> lowerLevels = {});
+#ifdef __ANDROID__
+    bool TryUploadBcnAsAstc(TextureRecord& texture, std::span<const uint8_t> pixels,
+                           std::span<const uint8_t> lowerLevels, uint32_t width,
+                           uint32_t height, uint32_t mipLevels, VkFormat rgbaFormat);
+    bool CreateBcnAstcPipeline();
+    void DestroyBcnAstcPipeline();
+    void ResetBcnAstcFrame(FrameResources& frame, bool shutdown);
+#endif
     void UploadNativePicaTextureRows(TextureRecord& texture,
                                     std::span<const uint8_t> pixels,
                                     uint32_t width, uint32_t height,
@@ -1373,6 +1387,17 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     void StoreDlssFeatureRecord();
     NativePicaPreparationCounters mNativePicaPreparationCounters;
     bool mNativePicaPreparationSummaryLogged = false;
+#ifdef __ANDROID__
+    bool mBcnAstcEnabled = false;
+    bool mBcnAstcSrgbSupported = false;
+    bool mBcnAstcPipelineAttempted = false;
+    bool mBcnAstcUploadFailureLogged = false;
+    VkDeviceSize mBcnAstcBufferAlignment = 0;
+    VkDeviceSize mBcnAstcMaxBufferRange = 0;
+    VkPipeline mBcnAstcPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout mBcnAstcPipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout mBcnAstcSetLayout = VK_NULL_HANDLE;
+#endif
     bool mNisVulkanFeaturesEnabled = false;
     bool mFsrVulkanFeaturesEnabled = false;
     bool mD3d12InteropExtensionsEnabled = false;
@@ -1382,6 +1407,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     std::string mNgxVulkanUnavailableReason;
     VkSwapchainKHR mSwapchain = VK_NULL_HANDLE;
     VkFormat mSwapchainFormat = VK_FORMAT_UNDEFINED;
+    bool mSwapchainCanReadBack = false;
     VkExtent2D mSwapchainExtent{};
     bool mNativeTopScreenExtendsToOutput = true;
     // The presentation picture inside the acquired swapchain: the aspect
@@ -1441,6 +1467,8 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
 #if defined(__ANDROID__)
     // Set by acquire/present (any thread) on VK_ERROR_SURFACE_LOST_KHR.
     std::atomic<bool> mAndroidSurfaceLost{false};
+    std::atomic<bool> mAndroidSurfaceResized{false};
+    std::chrono::steady_clock::time_point mNextAndroidSurfaceCheck{};
     // The ANativeWindow mSurface was created for; SDL replaces it after the
     // Activity's surface was destroyed and created again.
     void* mAndroidNativeWindow = nullptr;
@@ -1545,6 +1573,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     std::set<std::pair<Extension::PicaAotShaderStage, uint64_t>> mPicaAotShaderHitIdentities;
     std::atomic<uint64_t> mPicaAotShaderHits = 0;
     std::atomic<uint64_t> mNativeFragmentArtifactHits = 0;
+    std::atomic<uint64_t> mNativeFragmentArtifactMisses = 0;
     std::atomic<uint64_t> mNativeVertexArtifactHits = 0;
     std::atomic<uint64_t> mPicaAotShaderMisses = 0;
     bool mPicaAotShaderStrict = false;
@@ -2036,6 +2065,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     float mInternalResolutionScale = 1.0F;
     bool mPresentationSettingsApplied = false;
     bool mPresentationSettingsHeld = false;
+    bool mMenuBackdropVisible = false;
     uint8_t mAppliedWindowMode = 0;
     uint32_t mAppliedOutputWidth = 0;
     uint32_t mAppliedOutputHeight = 0;
@@ -2048,6 +2078,7 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     // the texture samplers were last built with (Graphics.Textures.Anisotropy).
     float mMaxSamplerAnisotropy = 1.0F;
     float mTextureAnisotropy = 1.0F;
+    uint8_t mTextureMipLimit = 0;
     VkResolveModeFlagBits mNativePicaDepthResolveMode = VK_RESOLVE_MODE_NONE;
     bool mFrameSubmitted = false;
     std::atomic<bool> mImGuiInitialized{false};
@@ -2209,6 +2240,9 @@ class GfxRenderingAPIVulkan final : public GfxRenderingAPI,
     // An upscaler is configured: a target's boundary before native UI keeps
     // the scene it completed (SceneBeforeUi) for it.
     bool mPresentationUpscaler = false;
+    bool mPresentationSgsrEdgeDir = false;
+    bool mSgsrEdgeDirSupported = false;
+    bool mSgsrFloatSourceSupported = false;
     // The native UI overlay of this frame's upscaled display (reused with it).
     bool mNativeUiOverlayExecutedThisFrame = false;
     bool mNativeFidelityProfile = false;

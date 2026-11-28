@@ -232,11 +232,14 @@ pub fn prepare_shader_seed(
     };
     let cancel = CancelToken::new();
     let mode = get(seed_map, "mode").as_str().unwrap_or_default();
-    let (mode_data, artifacts) = match mode {
+    let (mode_data, artifact_hashes) = match mode {
         "portable_pack" => {
-            let pack = checked_file(root, index(seed, "pack")?, &cancel)?;
+            let record = index(seed, "pack")?;
+            let pack = checked_file(root, record, &cancel)?;
             pack_header(&pack, schema)?;
-            (SeedMode::Portable { pack: pack.clone() }, vec![pack])
+            // checked_file already verified the complete pack against this digest.
+            let digest = index(record, "sha256")?.as_str().ok_or_else(|| contract("Shader pack requires a SHA-256"))?;
+            (SeedMode::Portable { pack }, vec![digest.to_owned()])
         }
         "citra_transferable" | "source_inventories" => {
             let mut transferable = None;
@@ -265,11 +268,11 @@ pub fn prepare_shader_seed(
             artifacts.push(compiler.clone());
             artifacts.extend(inventories.iter().cloned());
             artifacts.extend(dependencies);
-            (SeedMode::Compiled { transferable, compiler, inventories }, artifacts)
+            let artifact_hashes = artifacts.iter().map(|path| file_sha256(path)).collect::<Result<Vec<_>>>()?;
+            (SeedMode::Compiled { transferable, compiler, inventories }, artifact_hashes)
         }
         _ => return Err(contract("Unsupported shader preparation mode")),
     };
-    let artifact_hashes = artifacts.iter().map(|path| file_sha256(path)).collect::<Result<Vec<_>>>()?;
     let identity = json!({"contract": seed, "recipe": index(&Value::Object(title.clone()), "recipe")?, "artifact_hashes": artifact_hashes});
     let key = forge_base::hashing::sha256_hex(dumps(&identity, Options::SPACED).as_bytes());
     let directory = resolve(data_root)?.join("shader-seeds").join(&key);

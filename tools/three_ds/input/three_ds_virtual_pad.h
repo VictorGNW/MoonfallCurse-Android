@@ -33,12 +33,15 @@ class VirtualPad {
     }
 
     void SetControl(DigitalControl control, bool pressed) noexcept {
-        const std::uint32_t bit = Bit(control);
+        SetControls(Bit(control), pressed);
+    }
+
+    void SetControls(std::uint32_t bits, bool pressed) noexcept {
         if (pressed) {
-            mHeld.fetch_or(bit, std::memory_order_acq_rel);
-            mPending.fetch_or(bit, std::memory_order_acq_rel);
+            mHeld.fetch_or(bits, std::memory_order_acq_rel);
+            mPending.fetch_or(bits, std::memory_order_acq_rel);
         } else {
-            mHeld.fetch_and(~bit, std::memory_order_acq_rel);
+            mHeld.fetch_and(~bits, std::memory_order_acq_rel);
         }
     }
     void SetCirclePad(float x, float y) noexcept { mCirclePad.store(Pack(x, y), std::memory_order_release); }

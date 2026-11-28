@@ -1,6 +1,8 @@
 package org.triaevum.android;
 
 import android.content.Context;
+import android.os.Build;
+import android.view.Surface;
 import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.ViewGroup;
@@ -10,6 +12,38 @@ import org.triaevum.android.diagnostics.StartupDiagnostics;
 /** SDL retains lifecycle/input ownership; only the Android buffer extent is constrained. */
 final class TriAevumSurface extends SDLSurface {
     private final int maximumShortEdge;
+    private int presentationRate;
+    private boolean frameRateHintActive;
+    private boolean surfaceReady;
+
+    void setPresentationRate(int hz) {
+        if (presentationRate == hz) return;
+        presentationRate = hz;
+        applyFrameRateHint();
+    }
+
+    void setFrameRateHintActive(boolean active) {
+        if (frameRateHintActive == active) return;
+        frameRateHintActive = active;
+        applyFrameRateHint();
+    }
+
+    private void applyFrameRateHint() {
+        if (Build.VERSION.SDK_INT < 30 || !surfaceReady) return;
+        Surface surface = getHolder().getSurface();
+        if (!surface.isValid()) return;
+        float rate = frameRateHintActive ? presentationRate : 0;
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                    Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+            } else {
+                surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+            }
+        } catch (IllegalArgumentException | IllegalStateException error) {
+            Log.w("TriAevum", "Android declined the presentation frame-rate hint", error);
+        }
+    }
 
     TriAevumSurface(Context context, int maximumShortEdge) {
         super(context);
@@ -25,6 +59,7 @@ final class TriAevumSurface extends SDLSurface {
     }
 
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
+        surfaceReady = false;
         StartupDiagnostics.stage(getContext(), "surface_destroyed");
         super.surfaceDestroyed(holder);
     }
@@ -51,5 +86,7 @@ final class TriAevumSurface extends SDLSurface {
         // not the independently sized SurfaceHolder buffer sent to Vulkan above.
         mWidth = viewWidth;
         mHeight = viewHeight;
+        surfaceReady = true;
+        applyFrameRateHint();
     }
 }

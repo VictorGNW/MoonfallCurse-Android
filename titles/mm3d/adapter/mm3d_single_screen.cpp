@@ -103,8 +103,13 @@ void Mm3dSingleScreen::ConfigureButtonOverlay(const NativeControlConfig& config,
     mButtonOverlay->Configure(config, prompts);
     // Touch prompts: the native HUD groups move into the anchored touch
     // controls (OoT3D TopScreen's shape and fill), on the 16:9 MM canvas.
-    mButtonOverlay->ApplyTouchHud(ThreeDsRecomp::Input::OverlayTouchAnchors().Snapshot(), 240.0F * 16.0F / 9.0F,
-                                  ResolveTopScreenTouchControlShape);
+#if defined(__ANDROID__)
+    // The Moonfall overlay draws its own sprites. Keep the native item HUD in place.
+    const ThreeDsRecomp::Input::TouchAnchorSet hudAnchors{};
+#else
+    const auto hudAnchors = ThreeDsRecomp::Input::OverlayTouchAnchors().Snapshot();
+#endif
+    mButtonOverlay->ApplyTouchHud(hudAnchors, 240.0F * 16.0F / 9.0F, ResolveTopScreenTouchControlShape);
 }
 void Mm3dSingleScreen::SubmitButtonOverlayCommandList(uint32_t address,uint32_t bytes) { mButtonOverlay->SubmitCommandList(address,bytes); }
 void Mm3dSingleScreen::ObserveButtonOverlayDraw(uint64_t draw) { mButtonOverlay->ObserveDraw(draw); }

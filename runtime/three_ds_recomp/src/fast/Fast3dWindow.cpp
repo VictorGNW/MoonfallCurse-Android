@@ -224,6 +224,10 @@ void Fast3dWindow::EndFrame() {
     mInterpreter->EndFrame();
 }
 
+void Fast3dWindow::EndFrame(const std::function<void()>& beforePresent) {
+    mInterpreter->EndFrame(beforePresent);
+}
+
 bool Fast3dWindow::IsFrameReady() {
     return mWindowManagerApi->IsFrameReady();
 }

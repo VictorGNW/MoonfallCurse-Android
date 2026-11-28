@@ -91,11 +91,12 @@ jobs:
       FORGE_KEY_B64: ${{ secrets.TRIAEVUM_RELEASE_SIGNING_KEY_B64 }}
       UNSIGNED: ${{ inputs.unsigned_candidate && 'true' || 'false' }}
       CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      SOURCE_REF: ${{ inputs.source_ref || 'v0.5.0-alpha.2' }}
     steps:
       - name: Checkout requested source (not necessarily the workflow branch)
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || 'v0.5.0-alpha.2' }}
+          ref: ${{ env.SOURCE_REF }}
           submodules: false
           persist-credentials: false
 
@@ -167,6 +168,8 @@ jobs:
           fi
 
       - name: Compile runtime, ARM64 title, Forge and APK
+        env:
+          TRIAEVUM_RELEASE_SIGNING_PASSPHRASE: ${{ secrets.TRIAEVUM_RELEASE_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
           argv=(python3 -I tools/android/android_release.py
@@ -190,7 +193,7 @@ jobs:
           find ports/android/app/build/outputs/apk/mc/release -maxdepth 1 -name "*.apk" -type f -print -quit | grep -q .
           cp ports/android/app/build/outputs/apk/mc/release/*.apk "$RUNNER_TEMP/mm3d-artifact/"
           (cd "$RUNNER_TEMP/mm3d-artifact" && sha256sum *.apk > SHA256SUMS.txt)
-          printf 'source_commit=%s\nsource_ref=%s\nsigned=%s\n' "$(git rev-parse HEAD)" "${{ inputs.source_ref || 'v0.5.0-alpha.2' }}" "$([[ "$UNSIGNED" != "true" ]] && echo yes || echo no)" > "$RUNNER_TEMP/mm3d-artifact/BUILD_INFO.txt"
+          printf 'source_commit=%s\nsource_ref=%s\nsigned=%s\n' "$(git rev-parse HEAD)" "$SOURCE_REF" "$([[ "$UNSIGNED" != "true" ]] && echo yes || echo no)" > "$RUNNER_TEMP/mm3d-artifact/BUILD_INFO.txt"
           echo "APK build completed; artifact contains an APK, checksum and source commit." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK to Actions only (not GitHub Releases)

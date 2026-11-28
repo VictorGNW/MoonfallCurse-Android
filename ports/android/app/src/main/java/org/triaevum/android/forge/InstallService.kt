@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Binder
 import android.os.Build
+import android.os.Debug
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -60,6 +61,7 @@ class InstallService : Service() {
         val detail: String = "",
         val done: Long = 0,
         val total: Long = -1,
+        val stageRemainingMs: Long? = null,
         /** Increments with every job this process started. */
         val generation: Int = 0,
         /** The terminal event's result (refresh, repair), as JSON text. */
@@ -140,14 +142,17 @@ class InstallService : Service() {
      * on) with the chosen [language]. [document] is the picked document's URI when the app holds
      * a persisted grant to it. False when a job is already running.
      */
-    fun install(descriptor: ParcelFileDescriptor, name: String, language: String?, document: String?): Boolean {
+    fun install(descriptor: ParcelFileDescriptor, name: String, language: String?, document: String?, prewarm: Boolean): Boolean {
         if (snapshot.running) {
             descriptor.close()
             return false
         }
         val rom = document?.let { RomDocument(it, name, language) }
         return begin(ForgeJob.INSTALL, getString(R.string.forge_preparing, name), rom) {
-            installRequest(descriptor, language)
+            getSharedPreferences(CHECKPOINT, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_PREWARM, prewarm)
+                .commit()
+            installRequest(descriptor, language, prewarm)
         }.also { if (!it) descriptor.close() }
     }
 
@@ -193,6 +198,7 @@ class InstallService : Service() {
     private fun begin(kind: ForgeJob, status: String, rom: RomDocument?, request: () -> JSONObject?): Boolean {
         if (snapshot.running) return false
         synchronized(jobLock) { cancelRequested = false }
+        firstProgressAt = 0L
         publish(Snapshot(running = true, job = kind, status = status, generation = snapshot.generation + 1))
         writeCheckpoint(STATE_RUNNING, kind, "", rom)
         // Started and promoted while the installer is in front, as Android 12+ requires.
@@ -216,7 +222,8 @@ class InstallService : Service() {
             if (job != 0L) ForgeNative.cancelJob(job)
         }
         main.post {
-            if (snapshot.running) publish(snapshot.copy(status = getString(R.string.forge_cancelling), detail = ""))
+            if (snapshot.running) publish(snapshot.copy(status = getString(R.string.forge_cancelling), detail = "",
+                done = 0, total = -1, stageRemainingMs = null))
         }
     }
 
@@ -267,7 +274,7 @@ class InstallService : Service() {
     }
 
     /** The install request, built off the main thread (the package copy can take a while), or null after closing [descriptor]. */
-    private fun installRequest(descriptor: ParcelFileDescriptor, language: String?): JSONObject? {
+    private fun installRequest(descriptor: ParcelFileDescriptor, language: String?, prewarm: Boolean): JSONObject? {
         val (packageRoot, profileRoot) = try {
             roots()
         } catch (error: Exception) {
@@ -285,6 +292,7 @@ class InstallService : Service() {
             .put("source_kind", "rom")
             .put("package_root", packageRoot.absolutePath)
             .put("download_hd_textures", false)
+            .put("prewarm_pipelines", prewarm)
             .put("android", androidTarget(this, profileRoot))
             .apply { if (language != null) put("game_language", language) }
     }
@@ -329,6 +337,17 @@ class InstallService : Service() {
                 val event = JSONObject(String(bytes))
                 when (event.optString("event")) {
                     "succeeded", "failed", "cancelled" -> return event
+                    "stage" -> {
+                        val stage = event.optString("stage")
+                        if (stage.isNotEmpty()) {
+                            // Persist before posting to the UI so the next launch can report it.
+                            val heapMiB = Debug.getNativeHeapAllocatedSize() shr 20
+                            getSharedPreferences(CHECKPOINT, Context.MODE_PRIVATE).edit()
+                                .putString(KEY_STAGE, "$stage (native heap ${heapMiB} MiB)")
+                                .commit()
+                        }
+                        main.post { progress(event) }
+                    }
                     else -> main.post { progress(event) }
                 }
             }
@@ -340,20 +359,39 @@ class InstallService : Service() {
         }
     }
 
+    private var firstProgressAt = 0L
+    private var firstProgressDone = 0L
+
+    private fun measuredProgress(current: Snapshot, event: JSONObject): Snapshot {
+        val total = event.optLong("total", -1)
+        val done = event.optLong("done")
+        val now = SystemClock.elapsedRealtime()
+        if (firstProgressAt == 0L || total != current.total || done < current.done) {
+            firstProgressAt = now
+            firstProgressDone = done
+        }
+        val elapsed = now - firstProgressAt
+        return current.copy(
+            done = done,
+            total = total,
+            stageRemainingMs = InstallerProgress.remainingMs(done, total, done - firstProgressDone, elapsed),
+        )
+    }
+
     private fun progress(event: JSONObject) {
         if (!snapshot.running) return
         val current = snapshot
         val next = when (event.optString("event")) {
             // The HD pack jobs keep this app's translated status; installations show Forge's stages.
-            "stage" -> current.copy(
-                status = if (current.job?.hdPack == true) current.status else event.optString("message"),
-                detail = "", done = 0, total = -1,
-            )
+            "stage" -> {
+                firstProgressAt = 0L
+                current.copy(
+                    status = if (current.job?.hdPack == true) current.status else event.optString("message"),
+                    detail = "", done = 0, total = -1, stageRemainingMs = null,
+                )
+            }
             "report" -> current.copy(detail = event.optString("message"))
-            "progress" -> current.copy(
-                done = event.optLong("done"),
-                total = if (event.isNull("total")) -1 else event.optLong("total", -1),
-            )
+            "progress" -> measuredProgress(current, event)
             else -> return
         }
         val stageChanged = next.status != current.status
@@ -553,6 +591,7 @@ class InstallService : Service() {
             .putString(KEY_JOB, kind?.code)
             .putString(KEY_MESSAGE, message.take(300))
             .putLong(KEY_TIME, System.currentTimeMillis())
+        if (state == STATE_RUNNING) editor.remove(KEY_STAGE).remove(KEY_PREWARM)
         if (kind == ForgeJob.INSTALL && state == STATE_RUNNING) {
             editor.putString(KEY_ROM_URI, rom?.uri).putString(KEY_ROM_NAME, rom?.name).putString(KEY_ROM_LANGUAGE, rom?.language)
         }
@@ -575,6 +614,8 @@ class InstallService : Service() {
         private const val KEY_JOB = "job"
         private const val KEY_MESSAGE = "message"
         private const val KEY_TIME = "time"
+        private const val KEY_STAGE = "last_stage"
+        private const val KEY_PREWARM = "pipeline_prewarm"
         private const val KEY_ROM_URI = "rom_uri"
         private const val KEY_ROM_NAME = "rom_name"
         private const val KEY_ROM_LANGUAGE = "rom_language"
@@ -618,7 +659,15 @@ class InstallService : Service() {
             val job = preferences.getString(KEY_JOB, null) ?: "install"
             val time = java.time.Instant.ofEpochMilli(preferences.getLong(KEY_TIME, 0))
             val message = preferences.getString(KEY_MESSAGE, "").orEmpty()
-            return "$job $state at $time" + if (message.isEmpty()) "" else " ($message)"
+            return buildString {
+                append("$job $state at $time")
+                if (message.isNotEmpty()) append(" ($message)")
+                if (preferences.contains(KEY_PREWARM)) {
+                    append("; Vulkan pipeline prewarm requested: ")
+                    append(preferences.getBoolean(KEY_PREWARM, false))
+                }
+                preferences.getString(KEY_STAGE, null)?.let { append("; last observed Forge stage: $it") }
+            }
         }
     }
 }

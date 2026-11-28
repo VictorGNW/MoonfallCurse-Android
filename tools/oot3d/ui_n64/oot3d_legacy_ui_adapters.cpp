@@ -5,6 +5,8 @@
 #include "fast/renderer/compatibility_combiner.h"
 
 #include <array>
+#include <cstdio>
+#include <exception>
 #include <vector>
 
 namespace oot3d::ui {
@@ -82,7 +84,13 @@ std::uint32_t Fast3dUiRenderBackend::CreateUiTexture(
 void Fast3dUiRenderBackend::DeleteUiTexture(
     std::uint32_t textureId) noexcept {
     if (textureId != 0U) {
-        rendering_api_.DeleteTexture(textureId);
+        try {
+            rendering_api_.DeleteTexture(textureId);
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "UI texture cleanup failed: %s\n", error.what());
+        } catch (...) {
+            std::fprintf(stderr, "UI texture cleanup failed with an unknown error\n");
+        }
     }
 }
 

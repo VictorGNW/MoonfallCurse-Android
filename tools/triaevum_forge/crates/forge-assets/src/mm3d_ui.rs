@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Launcher-owned MM EUR UI assets. No Python, compiler or ROM payload is shipped.
+//! Launcher-owned MM3D UI assets. No Python, compiler or ROM payload is shipped.
 use crate::{Report, mm3d_font, mm3d_layout, mm3d_messages, romfs};
 use forge_base::fsutil::{atomic_write_bytes, atomic_write_json, load_json_object};
 use forge_base::hashing::{hex, sha256_file, sha256_hex};
@@ -10,6 +10,24 @@ use std::path::{Path, PathBuf};
 
 pub const CODE: &str = "6eec27b1827eab2c87744ac38066d569ffe6fe75790b1eb3300bd91f5099038d";
 const FINGERPRINTS: &str = include_str!("../../../../../titles/mm3d/dekui/setup/setup-fingerprints.json");
+const USA_V11_ROMFS: &str = "7b64a50a303eb4b9ec0939630d5e77b8e89a92ea129ea06f73b67d20a1ec024a";
+const EUR_ARCHIVES: [(&str, &str, u32); 5] = [
+    ("en", "message/eu/eue.gmsg", 16),
+    ("de", "message/eu/eug.gmsg", 32),
+    ("fr", "message/eu/euf.gmsg", 64),
+    ("es", "message/eu/eus.gmsg", 128),
+    ("it", "message/eu/eui.gmsg", 256),
+];
+const USA_ARCHIVES: [(&str, &str, u32); 3] = [
+    ("en", "message/us/use.gmsg", 2),
+    ("fr", "message/us/usf.gmsg", 4),
+    ("es", "message/us/uss.gmsg", 8),
+];
+
+fn message_archives(romfs_sha256: &str) -> &'static [(&'static str, &'static str, u32)] {
+    if romfs_sha256 == USA_V11_ROMFS { &USA_ARCHIVES } else { &EUR_ARCHIVES }
+}
+
 const FORMAT: &str = "triaevum_mm3d_native_ui_v1";
 #[derive(Debug)]
 pub struct PreparedUi {
@@ -59,15 +77,19 @@ pub fn verify_layer(layer: &Path, cancel: &CancelToken) -> Result<()> {
             return Err(invalid(format!("MM UI asset changed: {name}; prepare again")));
         }
     }
-    for name in ["eue", "eug", "euf", "eus", "eui"] {
-        let path = format!("message/eu/{name}.gmsg");
-        expected_files.insert(path.clone());
+    let romfs_sha256 = receipt
+        .get("identity")
+        .and_then(|v| v.get("romfs"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    for &(_, path, _) in message_archives(romfs_sha256) {
+        expected_files.insert(path.to_owned());
         let expected = receipt
             .get("files")
-            .and_then(|v| v.get(&path))
+            .and_then(|v| v.get(path))
             .and_then(Value::as_str)
             .ok_or_else(|| invalid("MM UI receipt lacks a prepared language archive"))?;
-        if digest(&layer.join(&path), cancel)? != expected {
+        if digest(&layer.join(path), cancel)? != expected {
             return Err(invalid(format!("Prepared MM archive changed: {path}")));
         }
     }
@@ -204,18 +226,28 @@ pub fn prepare(
         files.insert(output[6..].to_owned(), transformed);
     }
     let specs_path = data_root.join("imports/mm3d-message-specs.json");
-    let spec_bytes = if specs_path.is_file() {
+    let custom_specs = specs_path.is_file();
+    let spec_bytes = if custom_specs {
         read(&specs_path)?
     } else {
         include_bytes!("../../../../../titles/mm3d/dekui/setup/reviewed-dialogue.json").to_vec()
     };
     let specs: Value = serde_json::from_slice(&spec_bytes).map_err(|e| invalid(e.to_string()))?;
-    if !specs
-        .as_object()
-        .is_some_and(|s| s.len() == 5 && s.keys().all(|k| ["en", "de", "fr", "es", "it"].contains(&k.as_str())))
-    {
+    let archives = message_archives(romfs_sha256);
+    if romfs_sha256 != USA_V11_ROMFS && !specs.as_object().is_some_and(|specs| specs.len() == archives.len()) {
         return Err(invalid("MM preparation requires reviewed specs for all five EUR languages"));
     }
+    let mut selected_specs = serde_json::Map::new();
+    for &(code, _, mask) in archives {
+        let mut spec = specs.get(code).cloned().ok_or_else(|| invalid(format!("Missing MM dialogue spec: {code}")))?;
+        // The built-in EN/FR/ES rules use the same message IDs in USA v1.1.
+        // Custom imports still have to declare which archive mask they target.
+        if romfs_sha256 == USA_V11_ROMFS && !custom_specs {
+            spec["language_masks"] = json!([mask]);
+        }
+        selected_specs.insert(code.to_owned(), spec);
+    }
+    let specs = Value::Object(selected_specs);
     let font_path = package.join("resources/topscreen/singlescreen-3.1/ltn16.qbf");
     let hd_font = read(&font_path)?;
     if sha256_hex(&hd_font) != crate::topscreen::HD_FONT_IDENTITY.1 {
@@ -224,10 +256,8 @@ pub fn prepare(
     let (font_pack, font_manifest) = mm3d_font::prepare(&native(romfs_path, "message/ltn16.gzf")?, &hd_font, &specs)?;
     let mut edits = Vec::new();
     let mut languages = BTreeMap::new();
-    for (code, name, mask) in
-        [("en", "eue", 16u32), ("de", "eug", 32), ("fr", "euf", 64), ("es", "eus", 128), ("it", "eui", 256)]
-    {
-        let bytes = native(romfs_path, &format!("message/eu/{name}.gmsg"))?;
+    for &(code, path, mask) in archives {
+        let bytes = native(romfs_path, path)?;
         if bytes.len() < 16
             || &bytes[..8] != b"GMSG\x01\0\0\0"
             || u32::from_le_bytes(bytes[12..16].try_into().unwrap()) != mask
@@ -240,7 +270,7 @@ pub fn prepare(
             code,
             json!({"source_sha256":sha256_hex(&bytes),"edits":compiled.len(),"expanded_sha256":sha256_hex(&expanded)}),
         );
-        files.insert(format!("message/eu/{name}.gmsg"), expanded);
+        files.insert(path.to_owned(), expanded);
         edits.extend(compiled);
     }
     let messages = serde_json::to_vec(&json!({"format":"triaevum_mm3d_message_edits_v1","edits":edits}))
@@ -361,7 +391,15 @@ mod tests {
         let cached = build();
         assert_eq!(first.layer, cached.layer);
         let rows: Value = serde_json::from_slice(&std::fs::read(&first.messages).unwrap()).unwrap();
-        assert_eq!(rows["edits"].as_array().unwrap().len(), 795);
+        let archives = message_archives(&hash);
+        assert_eq!(rows["edits"].as_array().unwrap().len(), 159 * archives.len());
+        for &(_, path, mask) in archives {
+            assert!(first.layer.join(path).is_file());
+            assert_eq!(
+                rows["edits"].as_array().unwrap().iter().filter(|row| row["language"] == mask.trailing_zeros()).count(),
+                159
+            );
+        }
         let font = first.layer.with_file_name("font_coverage.zip");
         std::fs::write(&font, b"broken").unwrap();
         assert!(verify_layer(&first.layer, &cancel).is_err());
@@ -386,6 +424,11 @@ mod tests {
         let mut specs: Value =
             serde_json::from_str(include_str!("../../../../../titles/mm3d/dekui/setup/reviewed-dialogue.json"))
                 .unwrap();
+        if hash == USA_V11_ROMFS {
+            for &(code, _, mask) in archives {
+                specs[code]["language_masks"] = json!([mask]);
+            }
+        }
         specs["en"]["edits"].as_array_mut().unwrap().last_mut().unwrap()["text"] = json!("Choose a name.");
         std::fs::write(&custom, serde_json::to_vec(&specs).unwrap()).unwrap();
         let interrupted = CancelToken::new();
@@ -395,7 +438,7 @@ mod tests {
         std::fs::remove_file(custom).unwrap();
         assert_eq!(build().layer, repaired.layer);
         println!(
-            "local MM acceptance: 795 rows, cache reuse, corrupt-font repair, retained generation, extra-file rejection, invalid/cancelled preparation rollback"
+            "local MM acceptance: language archives, cache reuse, corrupt-font repair, retained generation, extra-file rejection, invalid/cancelled preparation rollback"
         );
     }
 }

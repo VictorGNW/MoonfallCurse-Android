@@ -217,6 +217,26 @@ def substitute_shader_corpus(result: dict, data: dict, corpus: Path, source_root
     return records
 
 
+def add_mm3d_usa_revision(recipes: dict, catalog: dict, variant: dict) -> None:
+    """Bind USA v1.1 to the EUR module only when the execution image matches."""
+    eur_id = "mm3d-eur-local-6eec27b1"
+    eur = [recipe for recipe in recipes["recipes"] if recipe["id"] == eur_id]
+    modules = [entry for entry in catalog["titles"] if entry["recipe"] == eur_id]
+    if len(eur) != 1 or len(modules) != 1:
+        raise ValueError("MM3D Android requires one EUR reference recipe and title module")
+    recipe, module = eur[0], modules[0]
+    if (recipe["inputs"] != module["inputs"]
+            or recipe["inputs"]["code"] != variant["inputs"]["code"]
+            or recipe["process"] != variant["process"]
+            or any(key in entry for entry in (recipe, module) for key in ("input_adapter", "data_compatibility"))):
+        raise ValueError("MM3D USA v1.1 must share the verified EUR execution image")
+    if (any(entry["id"] == variant["id"] for entry in recipes["recipes"])
+            or any(entry["recipe"] == variant["id"] for entry in catalog["titles"])):
+        raise ValueError("Duplicate MM3D USA v1.1 reference revision")
+    recipes["recipes"].append({**recipe, **variant})
+    catalog["titles"].append({**module, "recipe": variant["id"], "inputs": variant["inputs"]})
+
+
 def create_package(reference_root: Path, native_stage: Path, output: Path, *, source_commit: str,
                    title: str | None = None, shader_corpus: Path | None = None,
                    source_root: Path | None = None) -> dict:
@@ -293,6 +313,13 @@ def create_package(reference_root: Path, native_stage: Path, output: Path, *, so
         destination = package / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
+    if product == "mm3d":
+        relative = "recipes/mm3d.json"
+        recipes = load_json_object(package / relative)
+        variant = Path(__file__).resolve().parents[2] / "titles/mm3d/forge/android_usa_v11.json"
+        add_mm3d_usa_revision(recipes, result, load_json_object(variant))
+        atomic_write_json(package / relative, recipes)
+        data[relative] = (dict(artifact(package / relative, relative), role="revision_recipe"), package / relative)
     atomic_write_json(package / CATALOG, result)
     inventory = {
         "format": INVENTORY_FORMAT,

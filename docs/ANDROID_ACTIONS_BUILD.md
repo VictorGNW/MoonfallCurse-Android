@@ -29,7 +29,7 @@ A distribuição de material de jogo protegido deve respeitar os direitos aplic�
 Reutilizar os **Secrets** já usados em [android-signing-check.yml](../.github/workflows/android-signing-check.yml):
 `TRIAEVUM_ANDROID_KEYSTORE_B64`, `TRIAEVUM_ANDROID_KEYSTORE_PASS`, `TRIAEVUM_ANDROID_KEY_ALIAS`, `TRIAEVUM_ANDROID_KEY_PASS`, e **Variable** `TRIAEVUM_ANDROID_SIGNER_SHA256`.
 
-O pacote Forge exige **outra chave**, Ed25519, cuja chave pública já seja confiável ao Forge distribuído. Para o workflow, fornecer `TRIAEVUM_RELEASE_SIGNING_KEY_B64` em Secret; **não gerar uma chave nova** sem ajustar a confiança do instalador. Um APK assinado não basta quando o Forge package está sem assinatura válida.
+O pacote Forge exige **outra chave**, Ed25519, cuja chave pública já seja confiável ao Forge distribuído. Para o workflow, fornecer `TRIAEVUM_RELEASE_SIGNING_KEY_B64` em Secret; **não gerar uma chave nova** sem ajustar a confiança do instalador. Para um PEM criptografado, configure também o Secret `TRIAEVUM_RELEASE_SIGNING_PASSPHRASE`. Um APK assinado não basta quando o Forge package está sem assinatura válida.
 
 A opção `unsigned_candidate` é apenas para inspeção técnica: não produz APK atualizável sobre a instalação assinada.
 

@@ -76,6 +76,18 @@ void Correct(std::vector<GraphicsSettingsIssue>& issues, std::string field,
     issues.push_back({ std::move(field), std::move(message), true });
 }
 
+#if defined(__ANDROID__)
+void ApplyAndroidEffectsPolicy(EffectsSettings& effects) {
+    effects.SurfaceLighting = SurfaceLightingMode::Native;
+    effects.DirectionalShadows.Mode = DirectionalShadowMode::Off;
+    effects.PointShadows.Mode = PointShadowMode::Off;
+    effects.GlobalIllumination.Mode = GlobalIlluminationMode::Off;
+    effects.AmbientOcclusion = AmbientOcclusionMode::Off;
+    effects.Reflections = ReflectionMode::Off;
+    effects.WaterReflections = false;
+}
+#endif
+
 bool IsMsaaCount(uint8_t samples) {
     return samples == 1 || samples == 2 || samples == 4 || samples == 8;
 }
@@ -83,8 +95,6 @@ bool IsMsaaCount(uint8_t samples) {
 bool IsDirectionalShadowResolution(uint32_t resolution) {
     return resolution == 2048U || resolution == 4096U;
 }
-
-constexpr float kEnhancedForMobileRenderScale = 0.8F;
 
 } // namespace
 
@@ -191,7 +201,16 @@ bool GraphicsSettingsValidation::Accepted() const {
 }
 
 GraphicsSettingsService::GraphicsSettingsService(GraphicsSettings initial)
-    : mCurrent(std::move(initial)), mLastKnownGood(mCurrent) {
+    : mCurrent(std::move(initial)) {
+#if defined(__ANDROID__)
+    ApplyAndroidEffectsPolicy(mCurrent.Effects);
+    if (mCurrent.AntiAliasing == AntiAliasingMode::Msaa || mCurrent.AntiAliasing == AntiAliasingMode::Taa)
+        mCurrent.AntiAliasing = AntiAliasingMode::Fxaa;
+    if (mCurrent.AntiAliasing == AntiAliasingMode::Upscaler)
+        mCurrent.AntiAliasing = AntiAliasingMode::Off;
+    mCurrent.MsaaSamples = 1;
+#endif
+    mLastKnownGood = mCurrent;
 }
 
 GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
@@ -201,13 +220,17 @@ GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
         // A tuned play configuration (EnhancedPresetDocument).
         value = EnhancedPresetSettings();
     } else if (preset == GraphicsPreset::EnhancedForMobile) {
-        // Enhanced's look at a phone's cost: 30 fps without interpolation, 80%
-        // internal scale and 80% of the desktop grass budget. A phone at 60 fps
-        // runs hot and loses its GPU clocks within a minute.
         value = EnhancedPresetSettings();
         value.Preset = preset;
-        value.FrameRate = FrameRateMode::Original30;
-        value.InternalResolutionScale = kEnhancedForMobileRenderScale;
+        value.FrameRate = FrameRateMode::Interpolated2x;
+        value.InternalResolutionScale = 0.8F;
+        value.AntiAliasing = AntiAliasingMode::Smaa1x;
+        value.SgsrEdgeDir = true;
+        value.MsaaSamples = 1;
+        value.Anisotropy = 8;
+        value.TextureMipLimit = 4;
+        value.FovMultiplier = 1.10F;
+        value.ExtendedDrawDistance = true;
         value.Grass.MaxInstancesPerRoom = value.Grass.MaxInstancesPerRoom / 5U * 4U;
         // Water keeps its waves, Fresnel sky (fog colour) reflection, sun
         // specular and foam in the scene shader; the screen-space water trace
@@ -232,6 +255,9 @@ GraphicsSettings GraphicsSettingsService::Preset(GraphicsPreset preset) {
     } else if (preset == GraphicsPreset::Custom) {
         value.Preset = GraphicsPreset::Custom;
     }
+#if defined(__ANDROID__)
+    ApplyAndroidEffectsPolicy(value.Effects);
+#endif
     return value;
 }
 
@@ -258,8 +284,7 @@ GraphicsSettings ProductDefaultGraphicsSettings() {
 
 std::span<const GraphicsPreset> BuiltInGraphicsPresets(GraphicsPresetHost host) noexcept {
     static constexpr std::array desktop{GraphicsPreset::Authentic, GraphicsPreset::Enhanced, GraphicsPreset::Toon};
-    static constexpr std::array mobile{GraphicsPreset::Authentic, GraphicsPreset::Enhanced,
-                                       GraphicsPreset::EnhancedForMobile, GraphicsPreset::Toon};
+    static constexpr std::array mobile{GraphicsPreset::Authentic, GraphicsPreset::EnhancedForMobile};
     if (host == GraphicsPresetHost::Mobile) return mobile;
     return desktop;
 }
@@ -282,16 +307,19 @@ int GraphicsPresetChoiceIndex(GraphicsPresetHost host, GraphicsPreset preset) no
 
 void ResetDisplaySettings(GraphicsSettings& settings) {
     // The least demanding presentation: a window at the product's default
-    // size, native render scale, no anti-aliasing or upscaler. Enhanced for
-    // Mobile keeps its own scale: it is the preset's, and a phone's safe one.
+    // size, native render scale, no anti-aliasing or upscaler.
     const GraphicsSettings safe{};
     settings.Window = safe.Window;
     settings.OutputWidth = kProductDefaultWindowExtent.Width;
     settings.OutputHeight = kProductDefaultWindowExtent.Height;
     settings.OutputProvenance = WindowExtentProvenance::Default;
-    settings.InternalResolutionScale = settings.Preset == GraphicsPreset::EnhancedForMobile
-                                           ? kEnhancedForMobileRenderScale
-                                           : safe.InternalResolutionScale;
+    if (settings.Preset == GraphicsPreset::EnhancedForMobile &&
+        (settings.InternalResolutionScale != safe.InternalResolutionScale ||
+         settings.AntiAliasing != safe.AntiAliasing)) {
+        settings.Preset = GraphicsPreset::Custom;
+    }
+    settings.InternalResolutionScale = safe.InternalResolutionScale;
+    settings.SgsrEdgeDir = safe.SgsrEdgeDir;
     settings.AntiAliasing = safe.AntiAliasing;
     settings.MsaaSamples = safe.MsaaSamples;
     settings.Upscaler = safe.Upscaler;
@@ -356,6 +384,7 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         std::clamp(value.UpscalerSharpness, 0.0F, 1.0F);
     if (value.UpscalerDlssModel > DlssModel::Cnn)
         value.UpscalerDlssModel = DlssModel::Default;
+#if !defined(__ANDROID__)
     // The selectable models are Native (native shading, PBR only on supported
     // pack materials) and Modern (per-pixel + PBR). Per-pixel without PBR is
     // Modern without a pack; plain native shading remains the capability
@@ -371,6 +400,7 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         Correct(result.Issues, "Graphics.Effects.SurfaceLighting",
                 capabilities.Get(GraphicsCapability::NativeSurfaceLighting).Reason);
     }
+#endif
     value.Effects.AoQuality = std::min<uint8_t>(value.Effects.AoQuality, 1U);
     value.Effects.AoRadius = std::clamp(value.Effects.AoRadius, 0.05F, 100.0F);
     value.Effects.AoDetailRadius = std::isfinite(value.Effects.AoDetailRadius)
@@ -908,6 +938,19 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
             return !(rect.MaxU > rect.MinU) || !(rect.MaxV > rect.MinV);
         });
     }
+#if defined(__ANDROID__)
+    if (value.AntiAliasing == AntiAliasingMode::Msaa || value.AntiAliasing == AntiAliasingMode::Taa) {
+        value.AntiAliasing = AntiAliasingMode::Fxaa;
+        Correct(result.Issues, "Graphics.AA.Mode", "legacy Android antialiasing migrated to FXAA");
+    }
+    // Existing configurations with filtering enabled now use the single
+    // Android filter setting. A device without anisotropy still selects mips.
+    if (value.Anisotropy == 2U || value.Anisotropy == 4U ||
+        value.Anisotropy == 8U || value.Anisotropy == 16U || value.TextureMipLimit != 0U) {
+        value.Anisotropy = capabilities.Has(GraphicsCapability::AnisotropicFiltering) ? 8U : 1U;
+        value.TextureMipLimit = 4U;
+    }
+#endif
     if (value.AntiAliasing == AntiAliasingMode::Taa &&
         (!capabilities.Has(GraphicsCapability::MotionVectors) ||
          !capabilities.Has(GraphicsCapability::TemporalHistory) ||
@@ -918,11 +961,16 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
     }
     if (value.AntiAliasing == AntiAliasingMode::Smaa1x &&
         !capabilities.Has(GraphicsCapability::Smaa1x)) {
-        value.AntiAliasing = AntiAliasingMode::Off;
+        value.AntiAliasing = value.Preset == GraphicsPreset::EnhancedForMobile
+            ? AntiAliasingMode::Fxaa : AntiAliasingMode::Off;
         Correct(result.Issues, "Graphics.AA.Mode",
                 "SMAA 1x requires the three-stage NRI compute pipeline");
     }
     if (value.AntiAliasing == AntiAliasingMode::Upscaler) {
+#if defined(__ANDROID__)
+        value.AntiAliasing = AntiAliasingMode::Off;
+        Correct(result.Issues, "Graphics.AA.Mode", "upscaling is unavailable on Android");
+#else
         const bool temporal = IsTemporalUpscaler(value.Upscaler);
         const GraphicsCapability providerCapability = [&] {
             switch (value.Upscaler) {
@@ -950,6 +998,7 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
                         ? "the selected temporal NRI upscaler or its guides are unavailable"
                         : "NRI NIS is unavailable in this build or on this GPU");
         }
+#endif
     }
     if (!IsMsaaCount(value.MsaaSamples)) {
         value.MsaaSamples = 1;
@@ -1044,6 +1093,8 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         auto grassMasks = std::move(value.Grass.Masks);
         auto reflectionMaterials = std::move(value.Effects.ReflectionMaterials);
         value.InternalResolutionScale = 1.0F;
+        value.SgsrEdgeDir = false;
+        value.TextureMipLimit = 0;
         value.AntiAliasing = AntiAliasingMode::Off;
         value.MsaaSamples = 1;
         value.FrameRate = FrameRateMode::Original30;
@@ -1055,6 +1106,9 @@ GraphicsSettingsValidation GraphicsSettingsService::Validate(
         value.Grass.Masks = std::move(grassMasks);
         value.Effects.ReflectionMaterials = std::move(reflectionMaterials);
     }
+#if defined(__ANDROID__)
+    ApplyAndroidEffectsPolicy(value.Effects);
+#endif
     result.Value = std::move(value);
     return result;
 }

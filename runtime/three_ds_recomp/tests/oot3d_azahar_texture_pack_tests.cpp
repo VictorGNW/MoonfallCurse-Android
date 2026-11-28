@@ -2,6 +2,7 @@
 #include "fast/extension/azahar_texture_pack_import.h"
 #include "fast/extension/portable_path_setting.h"
 #include "../src/fast/extension/azahar_pbr_materials.h"
+#include "../src/fast/extension/bcn_dds.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -745,6 +746,81 @@ class AzaharTexturePackImportTest : public Oot3dAzaharTexturePackTest {
         return true;
     }
 };
+
+// A 5x3 red/blue BC1 image and a single green 2x1 mip, with partial blocks.
+std::vector<uint8_t> MakeDx10BcnDds() {
+    std::vector<uint8_t> dds(148 + 3 * 8);
+    const auto write = [&](size_t offset, uint32_t value) {
+        for (size_t i = 0; i < 4; ++i)
+            dds[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+    };
+    write(0, 0x20534444); // DDS
+    write(4, 124);
+    write(12, 3);
+    write(16, 5);
+    write(28, 2);
+    write(76, 32);
+    write(80, 4);
+    write(84, 0x30315844); // DX10
+    write(128, 72); // BC1 sRGB
+    write(132, 3); // Texture2D
+    write(140, 1); // One image
+    write(148, 0xF800);
+    write(156, 0x001F);
+    write(164, 0x07E0);
+    return dds;
+}
+
+TEST(Oot3dAzaharTexturePack, BcnDdsKeepsSrgbPartialBlocksAndAuthoredMip) {
+    const auto dds = MakeDx10BcnDds();
+    using Oot3d::Renderer::DecodeBcnDds;
+    const auto image = DecodeBcnDds(dds);
+    EXPECT_EQ(image.Width, 5U);
+    EXPECT_EQ(image.Height, 3U);
+    EXPECT_EQ(image.MipLevels, 2U);
+    EXPECT_TRUE(image.Srgb);
+    ASSERT_EQ(image.BaseRgba8.size(), 5 * 3 * 4U);
+    EXPECT_EQ((std::array{image.BaseRgba8[0], image.BaseRgba8[1], image.BaseRgba8[2], image.BaseRgba8[3]}),
+              (std::array<uint8_t, 4>{255, 0, 0, 255}));
+    EXPECT_EQ((std::array{image.BaseRgba8[56], image.BaseRgba8[57], image.BaseRgba8[58], image.BaseRgba8[59]}),
+              (std::array<uint8_t, 4>{0, 0, 255, 255}));
+    EXPECT_EQ(image.MipsRgba8, (std::vector<uint8_t>{0, 255, 0, 255, 0, 255, 0, 255}));
+    EXPECT_THROW(DecodeBcnDds(std::span(dds).first(dds.size() - 1)), std::runtime_error);
+    auto cubemap = dds;
+    cubemap[136] = 4;
+    EXPECT_THROW(DecodeBcnDds(cubemap), std::runtime_error);
+}
+
+TEST_F(AzaharTexturePackImportTest, ImportsAndLoadsAStandaloneBcnDds) {
+    using namespace Oot3d::Renderer;
+    std::array<uint8_t, 256> native{};
+    const AzaharTextureRequest request{8, 8, 0, 0, native, {}};
+    const auto hash = ComputeAzaharTextureHash(request, true);
+    std::ostringstream filename;
+    filename << "tex1_8x8_" << std::setfill('0') << std::setw(16) << std::hex << hash << "_0_mip0.dds";
+    const auto source = Root / "dds-pack";
+    const auto dds = MakeDx10BcnDds();
+    Text(source / filename.str(), std::string_view(reinterpret_cast<const char*>(dds.data()), dds.size()));
+    Text(source / "pack.json", R"({"options":{"use_new_hash":true}})");
+    const auto imported = Import(source);
+    ASSERT_TRUE(imported.Imported) << imported.Message;
+    EXPECT_EQ(imported.Textures, 1U);
+    EXPECT_EQ(imported.NotLoadedYet, 0U);
+
+    AzaharTexturePackRuntime runtime;
+    runtime.Configure({.LoadCustomTextures = true, .TitleId = kUsa, .UserDirectory = Root,
+                       .LoadDirectory = Destination()});
+    runtime.WaitForPendingLoads();
+    EXPECT_EQ(runtime.ResolveOrQueue(request).State, AzaharTextureResolveState::Pending);
+    runtime.WaitForPendingLoads();
+    const auto ready = runtime.PollQueued(hash);
+    ASSERT_EQ(ready.State, AzaharTextureResolveState::Ready);
+    ASSERT_NE(ready.Replacement, nullptr);
+    EXPECT_TRUE(ready.Replacement->BcnSource);
+    EXPECT_TRUE(ready.Replacement->Srgb);
+    EXPECT_EQ(ready.Replacement->MipLevels, 2U);
+    EXPECT_EQ(*ready.Replacement->MipsRgba8, (std::vector<uint8_t>{0, 255, 0, 255, 0, 255, 0, 255}));
+}
 
 TEST_F(AzaharTexturePackImportTest, ImportsTheInstalledTitleFolderAndSkipsOtherFiles) {
     const auto source = Root / "download";

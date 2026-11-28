@@ -9,9 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -21,6 +23,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.text.format.Formatter
+import android.text.format.DateUtils
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -29,15 +32,19 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import org.json.JSONObject
 import org.triaevum.android.R
 import org.triaevum.android.GameSession
+import org.triaevum.android.BcnTranscoding
+import org.triaevum.android.TurnipDriver
 import org.triaevum.android.diagnostics.DiagnosticsActivity
 import org.triaevum.android.diagnostics.StartupDiagnostics
 import org.triaevum.android.diagnostics.StartupReport
@@ -75,7 +82,7 @@ import java.io.File
  * with the download size comes first (never a Wi-Fi-only rule), offline the screen says so, and an
  * archive downloaded elsewhere can be imported with the document picker. Both run in
  * [InstallService] with progress and Cancel; the next installation from the ROM applies the pack.
- * The installer's language follows decision 8 ([ForgeLocale]): the ROM's game languages.
+ * The installer follows the device language by default or keeps an explicit interface override.
  */
 class InstallerActivity : Activity() {
     private lateinit var stateBox: LinearLayout
@@ -87,12 +94,19 @@ class InstallerActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var detail: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var progressPercent: TextView
+    private lateinit var progressTime: TextView
+    private lateinit var progressBox: LinearLayout
+    private lateinit var secondaryActions: LinearLayout
+    private lateinit var progressHint: TextView
     private lateinit var card: LinearLayout
     private lateinit var cardTitle: TextView
     private lateinit var cardText: TextView
     private lateinit var languages: RadioGroup
     private lateinit var select: Button
     private lateinit var installButton: Button
+    private lateinit var prewarmPipelines: CheckBox
+    private lateinit var prewarmDetails: TextView
     private lateinit var cancel: Button
     private lateinit var play: Button
     private lateinit var hdBox: LinearLayout
@@ -109,8 +123,6 @@ class InstallerActivity : Activity() {
     private var hdCheckAgain = false
     /** Re-renders the card under the state in the current language (after a language change). */
     private var cardRenderer: (() -> Unit)? = null
-    /** The game languages of the ROM in use (recognized or installed); empty before one is known. */
-    private var romLanguages: List<String> = emptyList()
     /** The language the views were built in. */
     private var builtLanguage = ""
     /** The running short job of this screen (recognition, language, preview), not the service's. */
@@ -185,9 +197,10 @@ class InstallerActivity : Activity() {
         super.onCreate(state)
         StartupDiagnostics.installCrashHandler(this, "forge")
         refreshTried = state?.getBoolean(KEY_REFRESH_TRIED) ?: false
-        // The languages of the ROM last seen, until this start knows its own.
-        applyLanguage(ForgeLocale.lastRomLanguages(this))
+        applyInstallerLanguage()
         builtLanguage = ForgeLocale.current(this)
+        window.statusBarColor = BACKGROUND_COLOR
+        window.navigationBarColor = BACKGROUND_COLOR
         setContentView(buildLayout())
         renderState()
         refreshInstall(false)
@@ -216,18 +229,22 @@ class InstallerActivity : Activity() {
         if (newConfig.locales[0].language != builtLanguage) rebuildForLanguage()
     }
 
-    /**
-     * Decision 8: the installer's language for the ROM's game languages [rom] (empty before one is
-     * known): the kept choice, else the system language, else English, as the desktop Forge does.
-     */
-    private fun applyLanguage(rom: List<String>) {
-        romLanguages = rom
-        if (rom.isNotEmpty()) ForgeLocale.rememberRomLanguages(this, rom)
-        val code = ForgeLocale.choose(rom, listOf(ForgeLocale.savedChoice(getExternalFilesDir(null)), ForgeLocale.systemLanguage()))
-        // Android 13+ answers with onConfigurationChanged; older versions changed the resources in place.
-        if (ForgeLocale.apply(this, code) && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && ::stateBox.isInitialized) {
+    private fun applyInstallerLanguage() {
+        val chosen = ForgeLocale.savedChoice(getExternalFilesDir(null))
+            ?.takeIf { it in ForgeLocale.INSTALLER_LANGUAGES }
+        val code = ForgeLocale.choose(chosen, ForgeLocale.systemLanguages(this))
+        val changed = ForgeLocale.apply(this, code, followDevice = chosen == null)
+        if (changed && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && ::stateBox.isInitialized) {
             rebuildForLanguage()
+        } else if (::languageButton.isInitialized) {
+            languageButton.text = installerLanguageLabel()
         }
+    }
+
+    private fun installerLanguageLabel(): String {
+        val choice = ForgeLocale.savedChoice(getExternalFilesDir(null))?.takeIf { it in ForgeLocale.INSTALLER_LANGUAGES }
+        return if (choice == null) getString(R.string.forge_language_automatic_button)
+        else getString(R.string.forge_language_button, ForgeLocale.NATIVE_NAMES[choice] ?: choice)
     }
 
     /** Builds the views again in the new language, keeping what the screen shows. */
@@ -250,20 +267,22 @@ class InstallerActivity : Activity() {
         inspect()
     }
 
-    /** The installer language switch: the languages decision 8 allows for the ROM in use. */
+    /** The interface language is independent from the game's language. */
     private fun chooseInstallerLanguage() {
-        val offered = ForgeLocale.offered(romLanguages)
-        val current = ForgeLocale.current(this)
-        val names = offered.map { ForgeLocale.NATIVE_NAMES[it] ?: it }.toTypedArray()
+        val offered = listOf(null) + ForgeLocale.INSTALLER_LANGUAGES
+        val current = ForgeLocale.savedChoice(getExternalFilesDir(null))
+        val names = offered.map {
+            if (it == null) getString(R.string.forge_language_automatic) else ForgeLocale.NATIVE_NAMES[it] ?: it
+        }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(R.string.forge_language_title)
-            .setSingleChoiceItems(names, offered.indexOf(current)) { dialog, index ->
+            .setSingleChoiceItems(names, offered.indexOf(current).coerceAtLeast(0)) { dialog, index ->
                 dialog.dismiss()
                 val profileRoot = getExternalFilesDir(null)
                 if (profileRoot == null || !ForgeLocale.saveChoice(profileRoot, offered[index])) {
                     status.text = getString(R.string.forge_language_not_kept)
                 }
-                applyLanguage(romLanguages)
+                applyInstallerLanguage()
             }
             .setNegativeButton(R.string.forge_cancel, null)
             .show()
@@ -422,6 +441,7 @@ class InstallerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        applyInstallerLanguage()
         refreshBanner()
     }
 
@@ -454,10 +474,68 @@ class InstallerActivity : Activity() {
         return true
     }
 
+    private var importingTurnip = false
+
+    private fun chooseGpuDriver() {
+        if (importingTurnip) return
+        val modes = buildList {
+            add(TurnipDriver.Mode.SYSTEM to R.string.forge_driver_use_system)
+            if (TurnipDriver.bundledAvailable(this@InstallerActivity))
+                add(TurnipDriver.Mode.BUNDLED to R.string.forge_turnip_use_bundled)
+            if (TurnipDriver.imported(this@InstallerActivity))
+                add(TurnipDriver.Mode.IMPORTED to R.string.forge_turnip_use_imported)
+        }
+        val selectedMode = TurnipDriver.mode(this)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.forge_gpu_driver)
+            .setSingleChoiceItems(modes.map { getString(it.second) }.toTypedArray(),
+                modes.indexOfFirst { it.first == selectedMode }.coerceAtLeast(0)) { dialog, index ->
+                dialog.dismiss()
+                try {
+                    TurnipDriver.setMode(this, modes[index].first)
+                    showGpuDriverResult(R.string.forge_driver_next_start)
+                } catch (_: java.io.IOException) {
+                    showGpuDriverResult(R.string.forge_turnip_failed)
+                }
+            }
+            .setPositiveButton(R.string.forge_turnip_import) { _, _ ->
+                val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("application/zip")
+                startActivityForResult(pick, PICK_TURNIP)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showGpuDriverResult(message: Int) {
+        if (!isFinishing && !isDestroyed) {
+            AlertDialog.Builder(this).setTitle(R.string.forge_gpu_driver).setMessage(message)
+                .setPositiveButton(android.R.string.ok, null).show()
+        }
+    }
+
     @Deprecated("Platform result API; the installer has no AndroidX dependency.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
+        if (requestCode == PICK_TURNIP && resultCode == RESULT_OK && uri != null && !importingTurnip) {
+            importingTurnip = true
+            Thread({
+                val message = try {
+                    val input = contentResolver.openInputStream(uri) ?: error("No driver file")
+                    input.use { TurnipDriver.importZip(this, it) }
+                    R.string.forge_turnip_imported
+                } catch (error: Exception) {
+                    Log.w(TAG, "Cannot import Vulkan driver", error)
+                    R.string.forge_turnip_failed
+                }
+                runOnUiThread {
+                    importingTurnip = false
+                    showGpuDriverResult(message)
+                }
+            }, "turnip-import").start()
+            return
+        }
         if (requestCode == PICK_HD_PACK && resultCode == RESULT_OK && uri != null) {
             val pack = try {
                 contentResolver.openFileDescriptor(uri, "r")
@@ -669,7 +747,6 @@ class InstallerActivity : Activity() {
                 title = getString(R.string.forge_state_ready)
                 body = listOfNotNull(
                     state?.packageVersion?.let { getString(R.string.forge_state_version, it) },
-                    getString(R.string.forge_state_ready_body),
                 ).joinToString(" ")
             }
             StateCard.UPDATE -> {
@@ -727,9 +804,9 @@ class InstallerActivity : Activity() {
         }
         val accent = if (error) ERROR_COLOR else ACCENT_COLOR
         stateBox.background = GradientDrawable().apply {
-            cornerRadius = dp(12).toFloat()
-            setStroke(dp(2), accent)
-            setColor((accent and 0x00FFFFFF) or 0x1A000000)
+            cornerRadius = dp(18).toFloat()
+            setStroke(dp(1), if (error) ERROR_COLOR else BORDER_COLOR)
+            setColor(SURFACE_COLOR)
         }
         stateTitle.text = title
         stateTitle.setTextColor(accent)
@@ -938,8 +1015,6 @@ class InstallerActivity : Activity() {
                 }
                 status.text = getString(if (document == null) R.string.forge_ready_to_install else R.string.forge_choose_language)
                 detail.text = ""
-                // Decision 8: the installer speaks one of this ROM's game languages.
-                if (entries.isNotEmpty()) applyLanguage(entries.map { it.first })
             }
             "failed" -> {
                 rom?.close()
@@ -982,10 +1057,11 @@ class InstallerActivity : Activity() {
         val language = codes.getOrNull(languageIndex())
         val name = romName
         val document = romDocument
+        val prewarm = prewarmPipelines.isChecked
         rom = null
         interrupted = null
         refreshInstall(true)
-        withService { it.install(descriptor, name, language, document) }
+        withService { it.install(descriptor, name, language, document, prewarm) }
     }
 
     private fun withService(action: (InstallService) -> Unit) {
@@ -999,16 +1075,21 @@ class InstallerActivity : Activity() {
         running = if (snapshot.running) snapshot.job ?: ForgeJob.INSTALL else null
         if (snapshot.running || snapshot.outcome != InstallService.Outcome.NONE) {
             status.text = snapshot.status
-            detail.text = if (snapshot.running && snapshot.total > 0 && snapshot.detail.isEmpty()) {
-                if (snapshot.job?.hdPack == true) {
-                    getString(R.string.hd_progress, sizeText(snapshot.done), sizeText(snapshot.total))
-                } else {
-                    getString(R.string.forge_progress, snapshot.done, snapshot.total)
-                }
-            } else {
-                snapshot.detail
-            }
+            detail.text = if (snapshot.running && snapshot.total > 0 &&
+                snapshot.detail.isEmpty() && snapshot.job?.hdPack == true
+            ) getString(R.string.hd_progress, sizeText(snapshot.done), sizeText(snapshot.total))
+            else snapshot.detail
         }
+        val percent = if (snapshot.running) InstallerProgress.percent(snapshot.done, snapshot.total) else null
+        progress.isIndeterminate = percent == null
+        if (percent != null) progress.setProgress(percent, true)
+        progressPercent.text = percent?.let { getString(R.string.forge_stage_percent, it) }.orEmpty()
+        progressPercent.visibility = if (percent != null) View.VISIBLE else View.GONE
+        val remaining = snapshot.stageRemainingMs
+        progressTime.text = if (snapshot.running && remaining != null) {
+            getString(R.string.forge_stage_remaining, DateUtils.formatElapsedTime((remaining + 999) / 1000))
+        } else ""
+        progressTime.visibility = if (progressTime.text.isNotEmpty()) View.VISIBLE else View.GONE
         if (!snapshot.running && snapshot.outcome != InstallService.Outcome.NONE && snapshot.generation != handledGeneration) {
             handledGeneration = snapshot.generation
             if (snapshot.outcome == InstallService.Outcome.SUCCEEDED && snapshot.job == ForgeJob.INSTALL) card.visibility = View.GONE
@@ -1032,6 +1113,7 @@ class InstallerActivity : Activity() {
         if (closing) return
         val enabled = getSystemService(NotificationManager::class.java).areNotificationsEnabled()
         banner.visibility = if (running != null && !enabled) View.VISIBLE else View.GONE
+        progressHint.visibility = if (running != null && enabled) View.VISIBLE else View.GONE
     }
 
     private fun openNotificationSettings() {
@@ -1062,8 +1144,6 @@ class InstallerActivity : Activity() {
                             document.optString("selected"), installed = true, error = false)
                     }
                     if (select != null) status.text = getString(R.string.forge_language_saved)
-                    // Decision 8: the installed game's languages, unless a picked ROM is shown.
-                    if (rom == null && entries.isNotEmpty()) applyLanguage(entries.map { it.first })
                 }
                 "failed" -> {
                     failed = true
@@ -1121,9 +1201,9 @@ class InstallerActivity : Activity() {
         val accent = if (error) ERROR_COLOR else ACCENT_COLOR
         card.visibility = View.VISIBLE
         card.background = GradientDrawable().apply {
-            cornerRadius = dp(12).toFloat()
-            setStroke(dp(2), accent)
-            setColor((accent and 0x00FFFFFF) or 0x1A000000)
+            cornerRadius = dp(18).toFloat()
+            setStroke(dp(1), if (error) ERROR_COLOR else BORDER_COLOR)
+            setColor(SURFACE_COLOR)
         }
         cardTitle.text = title
         cardTitle.setTextColor(accent)
@@ -1171,9 +1251,23 @@ class InstallerActivity : Activity() {
         if (closing) return
         val plan = currentPlan()
         val busy = screenJob || running != null || recovering
-        progress.visibility = if (busy || inspecting) ProgressBar.VISIBLE else ProgressBar.GONE
+        progress.visibility = if (busy || inspecting) View.VISIBLE else View.GONE
+        stateBox.visibility = if (plan.card == StateCard.WORKING && status.text.isNotEmpty()) View.GONE else View.VISIBLE
+        secondaryActions.visibility = if (running == null) View.VISIBLE else View.GONE
+        progressBox.visibility = if (busy || inspecting || status.text.isNotEmpty() || detail.text.isNotEmpty())
+            View.VISIBLE else View.GONE
+        if (running == null) {
+            progress.isIndeterminate = true
+            progressPercent.visibility = View.GONE
+            progressTime.visibility = View.GONE
+        }
         select.visibility = if (plan.select || (running == null && rom != null)) Button.VISIBLE else Button.GONE
         select.isEnabled = !busy && hasPackage
+        val selectPrimary = !(plan.play || (rom != null && recognizedLabel != null))
+        if (select.tag != selectPrimary) {
+            styleButton(select, selectPrimary)
+            select.tag = selectPrimary
+        }
         cancel.visibility = if (running != null || (screenJob && screenJobCancellable)) Button.VISIBLE else Button.GONE
         stateAction.isEnabled = !busy
         // Play only for a state that can play, never while Forge may be committing the title.
@@ -1193,6 +1287,9 @@ class InstallerActivity : Activity() {
         val ready = rom != null && recognizedLabel != null
         installButton.visibility = if (ready) Button.VISIBLE else Button.GONE
         installButton.isEnabled = ready && !busy
+        prewarmPipelines.visibility = installButton.visibility
+        prewarmDetails.visibility = installButton.visibility
+        prewarmPipelines.isEnabled = ready && !busy
     }
 
     /**
@@ -1236,30 +1333,45 @@ class InstallerActivity : Activity() {
     private fun dp(value: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics).toInt()
 
+    private fun styleButton(button: Button, primary: Boolean = false) = button.apply {
+        isAllCaps = false
+        minHeight = dp(48)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, if (primary) 17f else 14f)
+        setTextColor(ColorStateList(
+            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(MUTED_COLOR, if (primary) BACKGROUND_COLOR else TEXT_COLOR),
+        ))
+        background = RippleDrawable(ColorStateList.valueOf(0x334A3D64), GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(if (primary) ACCENT_COLOR else SURFACE_COLOR)
+            if (!primary) setStroke(dp(1), BORDER_COLOR)
+        }, null)
+        setPadding(dp(16), dp(10), dp(16), dp(10))
+    }
+
     /** A scrolling body with the actions below it, usable from 360 dp phones at 200% font scale. */
     private fun buildLayout(): LinearLayout {
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(8))
+            setPadding(dp(24), dp(26), dp(24), dp(16))
             addView(TextView(context).apply {
-                text = getString(R.string.forge_title)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-            })
-            addView(TextView(context).apply {
-                text = getString(R.string.forge_intro)
-                setPadding(0, dp(8), 0, dp(8))
-            })
-            addView(TextView(context).apply {
-                text = getString(R.string.forge_no_game_assets)
-                setPadding(0, 0, 0, dp(16))
-                alpha = 0.8f
+                text = applicationInfo.loadLabel(packageManager)
+                setTextColor(TEXT_COLOR)
+                setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 32f)
+                letterSpacing = -0.025f
+                setPadding(0, 0, 0, dp(20))
+                isAccessibilityHeading = true
             })
         }
         stateTitle = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             setTypeface(typeface, Typeface.BOLD)
         }
-        stateBody = TextView(this).apply { setPadding(0, dp(6), 0, dp(6)) }
+        stateBody = TextView(this).apply {
+            setTextColor(MUTED_COLOR)
+            setPadding(0, dp(6), 0, dp(6))
+        }
         stateDetails = TextView(this).apply {
             setPadding(0, 0, 0, dp(6))
             alpha = 0.7f
@@ -1277,7 +1389,7 @@ class InstallerActivity : Activity() {
             addView(stateTitle)
             addView(stateBody)
             addView(stateDetails)
-            addView(stateAction, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.END })
+            addView(styleButton(stateAction, true), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.END })
         }
         body.addView(stateBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
         // Without notifications the job still runs; only its progress notification is hidden.
@@ -1287,14 +1399,15 @@ class InstallerActivity : Activity() {
             visibility = View.GONE
             background = GradientDrawable().apply {
                 cornerRadius = dp(12).toFloat()
-                setColor(0x33FFB300)
+                setColor(SURFACE_COLOR)
+                setStroke(dp(1), BORDER_COLOR)
             }
             addView(TextView(context).apply { text = getString(R.string.forge_banner_notifications) })
-            addView(Button(context).apply {
+            addView(styleButton(Button(context).apply {
                 text = getString(R.string.forge_banner_turn_on)
                 minHeight = dp(48)
                 setOnClickListener { openNotificationSettings() }
-            }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.END })
+            }), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.END })
         }
         body.addView(banner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
         cardTitle = TextView(this).apply {
@@ -1364,42 +1477,135 @@ class InstallerActivity : Activity() {
             })
         }
         body.addView(hdBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
-        status = TextView(this).apply { setPadding(0, dp(8), 0, dp(4)) }
-        detail = TextView(this).apply { setPadding(0, 0, 0, dp(8)); alpha = 0.7f }
-        progress = ProgressBar(this).apply { isIndeterminate = true; visibility = ProgressBar.GONE }
-        body.addView(status)
-        body.addView(detail)
-        body.addView(progress)
+        status = TextView(this).apply {
+            setTextColor(TEXT_COLOR)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setTypeface(typeface, Typeface.BOLD)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        detail = TextView(this).apply { setTextColor(MUTED_COLOR); setPadding(0, dp(6), 0, 0) }
+        progressPercent = TextView(this).apply {
+            setTextColor(ACCENT_COLOR)
+            setTypeface(typeface, Typeface.BOLD)
+            visibility = View.GONE
+        }
+        progressTime = TextView(this).apply {
+            setTextColor(MUTED_COLOR)
+            setPadding(0, dp(6), 0, 0)
+            visibility = View.GONE
+        }
+        progressHint = TextView(this).apply {
+            text = getString(R.string.forge_background_progress_hint)
+            setTextColor(MUTED_COLOR)
+            setPadding(0, dp(10), 0, 0)
+            visibility = View.GONE
+        }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            progressTintList = ColorStateList.valueOf(ACCENT_COLOR)
+            indeterminateTintList = ColorStateList.valueOf(ACCENT_COLOR)
+            progressBackgroundTintList = ColorStateList.valueOf(BORDER_COLOR)
+        }
+        progressBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            visibility = View.GONE
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(SURFACE_COLOR)
+            }
+            addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(status, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(progressPercent)
+            })
+            addView(progress, LinearLayout.LayoutParams(MATCH_PARENT, dp(8)).apply { topMargin = dp(8) })
+            addView(progressTime)
+            addView(detail)
+            addView(progressHint)
+        }
+        body.addView(progressBox, 2, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
         // Secondary destinations: Saves and backups and the diagnostics report.
         val more = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(16), 0, 0)
             addView(Button(context).apply {
                 text = getString(R.string.forge_saves)
+                styleButton(this)
                 minHeight = dp(48)
                 setOnClickListener { startActivity(Intent(context, SavesActivity::class.java)) }
-            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
             addView(Button(context).apply {
                 text = getString(R.string.forge_report)
+                styleButton(this)
                 minHeight = dp(48)
                 setOnClickListener { openReport() }
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         }
-        body.addView(more, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         // The installer's language (decision 8): one of the ROM's game languages.
         languageButton = Button(this).apply {
-            val current = ForgeLocale.current(context)
-            text = getString(R.string.forge_language_button, ForgeLocale.NATIVE_NAMES[current] ?: current)
+            text = installerLanguageLabel()
             minHeight = dp(48)
             setOnClickListener { chooseInstallerLanguage() }
         }
-        body.addView(languageButton, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.START })
+        secondaryActions = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(more, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            if (TurnipDriver.available(context)) {
+                addView(styleButton(Button(context).apply {
+                    text = getString(R.string.forge_gpu_driver)
+                    setOnClickListener { chooseGpuDriver() }
+                }), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            }
+            addView(CheckBox(context).apply {
+                text = getString(R.string.forge_disable_bcn_transcoding)
+                setTextColor(TEXT_COLOR)
+                buttonTintList = ColorStateList.valueOf(ACCENT_COLOR)
+                minHeight = dp(48)
+                isChecked = BcnTranscoding.isDisabled(context)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked == BcnTranscoding.isDisabled(context)) return@setOnCheckedChangeListener
+                    try {
+                        BcnTranscoding.setDisabled(context, checked)
+                    } catch (_: java.io.IOException) {
+                        isChecked = BcnTranscoding.isDisabled(context)
+                        Toast.makeText(context, R.string.forge_bcn_setting_failed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(styleButton(languageButton), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT)
+                .apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(8) })
+        }
+        body.addView(secondaryActions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         select = Button(this).apply {
             text = getString(R.string.forge_select_rom)
             minHeight = dp(48)
             visibility = Button.GONE
             setOnClickListener { pickRom() }
         }
+        val preferences = getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+        prewarmPipelines = CheckBox(this).apply {
+            text = getString(R.string.forge_prewarm_pipelines)
+            setTextColor(TEXT_COLOR)
+            buttonTintList = ColorStateList.valueOf(ACCENT_COLOR)
+            minHeight = dp(48)
+            visibility = CheckBox.GONE
+            // Driver pipeline preparation can use substantial memory in the Forge process.
+            isChecked = preferences.getBoolean("prewarm_pipelines", false)
+            setOnCheckedChangeListener { _, checked ->
+                preferences.edit().putBoolean("prewarm_pipelines", checked).apply()
+            }
+        }
+        prewarmDetails = TextView(this).apply {
+            text = getString(R.string.forge_prewarm_pipelines_details)
+            setTextColor(MUTED_COLOR)
+            setPadding(dp(8), 0, dp(8), dp(16))
+            visibility = TextView.GONE
+        }
+        val optionsIndex = body.indexOfChild(card) + 1
+        body.addView(prewarmPipelines, optionsIndex)
+        body.addView(prewarmDetails, optionsIndex + 1)
         installButton = Button(this).apply {
             text = getString(R.string.forge_install)
             minHeight = dp(48)
@@ -1419,16 +1625,19 @@ class InstallerActivity : Activity() {
             setOnClickListener { GameSession.open(this@InstallerActivity) }
         }
         val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-            setPadding(dp(16), dp(8), dp(16), dp(16))
-            addView(cancel)
-            addView(select)
-            addView(installButton)
-            addView(play)
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(16))
+            setBackgroundColor(BACKGROUND_COLOR)
+            addView(styleButton(cancel), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(styleButton(select, true), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(styleButton(installButton, true), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+                .apply { topMargin = dp(8) })
+            addView(styleButton(play, true), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+                .apply { topMargin = dp(8) })
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(BACKGROUND_COLOR)
             addView(ScrollView(context).apply { addView(body) }, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
             addView(actions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             fitsSystemWindows = true
@@ -1440,6 +1649,7 @@ class InstallerActivity : Activity() {
         private const val PICK_ROM = 1
         private const val REQUEST_NOTIFICATIONS = 2
         private const val PICK_HD_PACK = 3
+        private const val PICK_TURNIP = 4
         private const val PREFERENCES = "installer"
         private const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
         private const val KEY_REFRESH_TRIED = "refresh_tried"
@@ -1454,7 +1664,12 @@ class InstallerActivity : Activity() {
         private const val HUD_KEEP = "keep"
         private const val HUD_STANDARD = "standard"
         private val DETAILED = setOf(StateCard.REPAIR, StateCard.NEEDS_ROM, StateCard.INCOMPATIBLE, StateCard.FAILED)
-        private const val ACCENT_COLOR = 0xFF2E7DD7.toInt()
-        private const val ERROR_COLOR = 0xFFD32F2F.toInt()
+        private const val BACKGROUND_COLOR = 0xFF121019.toInt()
+        private const val SURFACE_COLOR = 0xFF201C2B.toInt()
+        private const val BORDER_COLOR = 0xFF3D354B.toInt()
+        private const val TEXT_COLOR = 0xFFF5F0FA.toInt()
+        private const val MUTED_COLOR = 0xFFC7BBD1.toInt()
+        private const val ACCENT_COLOR = 0xFFD8C1FA.toInt()
+        private const val ERROR_COLOR = 0xFFFFA6AD.toInt()
     }
 }

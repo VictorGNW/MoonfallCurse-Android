@@ -210,4 +210,11 @@
     <string name="diagnostics_crash_message">Die letzte Sitzung endete mit: %1$s. Ein Diagnosebericht kann bei einer Fehlermeldung helfen; es wird nichts gesendet.</string>
     <string name="diagnostics_view">Bericht anzeigen</string>
     <string name="diagnostics_dismiss">Schließen</string>
+    <string name="forge_prewarm_pipelines">Bekannte Shader vor dem Spielen vorbereiten</string>
+    <string name="forge_prewarm_pipelines_details">Kann Ruckler beim ersten Spielen verringern. Die Installation dauert länger, benötigt zusätzlichen Cache-Speicher und kann das Gerät erwärmen. Überspringen geht schneller.</string>
+    <string name="forge_stage_percent">%1$d%%</string>
+    <string name="forge_stage_remaining">Noch etwa %1$s für diesen Schritt</string>
+    <string name="forge_background_progress_hint">Läuft im Hintergrund weiter, auch bei gesperrtem Bildschirm.</string>
+    <string name="forge_language_automatic">Automatisch (Gerätesprache)</string>
+    <string name="forge_language_automatic_button">Sprache: Automatisch</string>
 </resources>

@@ -506,7 +506,22 @@ void GfxRenderingAPIVulkan::PrepareNativePicaPrograms(
         Renderer3ds::NativeFragmentArtifacts(), device);
     const auto samples = device.Samples;
     const auto prepare = [this, device](const Item& item) {
-        return Renderer3ds::PreparePicaStartupProgramPart(mNriPicaPipelineBridge, item, device);
+#if defined(__ANDROID__)
+        const auto start = std::chrono::steady_clock::now();
+#endif
+        const bool prepared = Renderer3ds::PreparePicaStartupProgramPart(mNriPicaPipelineBridge, item, device);
+#if defined(__ANDROID__)
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (!prepared || elapsed >= std::chrono::seconds(1)) {
+            std::fprintf(stderr,
+                         "TRIAEVUM_STARTUP_PIPELINE_SLOW vs=%016llx fs=%016llx samples=%u a2c=%u ok=%u ms=%.1f\n",
+                         static_cast<unsigned long long>(Renderer3ds::NriPicaTraceProgramHash(item.Vertex)),
+                         static_cast<unsigned long long>(Renderer3ds::NriPicaTraceProgramHash(item.Fragment)),
+                         static_cast<unsigned>(device.Samples), unsigned(item.AlphaToCoverage),
+                         unsigned(prepared), std::chrono::duration<double, std::milli>(elapsed).count());
+        }
+#endif
+        return prepared;
     };
     const auto start = std::chrono::steady_clock::now();
     std::fprintf(stderr, "TRIAEVUM_NATIVE_PROGRAM_PREPARATION_BEGIN parts=%zu background=%u\n",
@@ -546,7 +561,14 @@ void GfxRenderingAPIVulkan::PrepareNativePicaPrograms(
     // About one thread per physical core, one left to the frame: driver
     // compilation oversubscribed across logical cores makes each part (and the
     // draw waiting for it) several times slower for no added throughput.
-    const unsigned defaultThreads = std::clamp(std::thread::hardware_concurrency() / 2U, 2U, 9U) - 1U;
+#if defined(__ANDROID__)
+    // Keep cold-start driver allocations bounded while the game is rendering.
+    constexpr unsigned maximumStartupWorkers = 2U;
+#else
+    constexpr unsigned maximumStartupWorkers = 8U;
+#endif
+    const unsigned defaultThreads = std::clamp(
+        std::thread::hardware_concurrency() / 2U, 2U, maximumStartupWorkers + 1U) - 1U;
     // Diagnostic override (TRIAEVUM_STARTUP_PART_THREADS=1..default): fewer
     // parts created at once, to measure the driver memory a cold start takes.
     unsigned threads = defaultThreads;
@@ -634,7 +656,14 @@ void GfxRenderingAPIVulkan::RenderImGuiDrawData(ImDrawData* drawData) {
 }
 
 void GfxRenderingAPIVulkan::OnResize() {
+#if defined(__ANDROID__)
+    // Android may send resize events without changing the Vulkan surface.
+    // Check the actual configuration at the start of the next frame before
+    // discarding the swapchain; OUT_OF_DATE still forces a rebuild.
+    mAndroidSurfaceResized.store(true);
+#else
     mSwapchainDirty = true;
+#endif
 }
 
 bool GfxRenderingAPIVulkan::PublishSceneView(
@@ -880,7 +909,8 @@ void GfxRenderingAPIVulkan::ClearFramebuffer(bool, bool) {
 
 std::vector<uint8_t> GfxRenderingAPIVulkan::ReadSwapchainRgba8(uint32_t& copyWidthOut, uint32_t& copyHeightOut,
                                                                bool& bgraOut) {
-    if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mDevice == VK_NULL_HANDLE ||
+    if (!mSwapchainCanReadBack || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 ||
+        mDevice == VK_NULL_HANDLE ||
         (mSwapchain == VK_NULL_HANDLE && !mNriSwapchain.Active()) ||
         mCurrentFramebuffer != 0) {
         return {};

@@ -30,5 +30,16 @@ int main() {
     if (schedulingAvailable && !pacer.MultimediaSchedulingActive()) return 9;
     NativeRealtimeRefreshPacer unpaced(false, 90);
     if (unpaced.MultimediaSchedulingActive()) return 10;
+#if defined(__ANDROID__)
+    // A late presentation at 30 Hz must not pull the next one closer just
+    // to catch up with the old deadline.
+    NativeRealtimeRefreshPacer androidPacer(true, 30);
+    androidPacer.WaitForNextRefresh();
+    std::this_thread::sleep_for(45ms);
+    androidPacer.WaitForNextRefresh();
+    const auto afterLateFrame = std::chrono::steady_clock::now();
+    androidPacer.WaitForNextRefresh();
+    if (std::chrono::steady_clock::now() - afterLateFrame < 31ms) return 11;
+#endif
     return 0;
 }
