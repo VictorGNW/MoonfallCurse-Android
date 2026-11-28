@@ -1222,8 +1222,13 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
     }
     const char* noPresent = std::getenv("TRIAEVUM_BENCHMARK_NO_PRESENT");
     mBenchmarkNoPresent = noPresent != nullptr && std::string_view(noPresent) == "1";
+    // The pinned NRI swapchain requests both transfer usages unconditionally.
+    constexpr VkImageUsageFlags transferUsage =
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    const VkImageUsageFlags supportedUsage = support.Capabilities.supportedUsageFlags;
+    const bool nriUsageSupported = (supportedUsage & transferUsage) == transferUsage;
     const bool nriCreated =
-        !mBenchmarkNoPresent && mNriSwapchain.Supported() &&
+        !mBenchmarkNoPresent && nriUsageSupported && mNriSwapchain.Supported() &&
         mNriSwapchain.Create({
             ResolveNriNativeWindow(mWindowBackend),
             extent.width,
@@ -1270,13 +1275,12 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
         imageCount = static_cast<uint32_t>(mSwapchainImages.size());
     } else {
         if (mNriSwapchain.Supported()) {
+            const std::string_view reason = nriUsageSupported
+                ? mNriSwapchain.UnavailableReason()
+                : "surface does not support both swapchain transfer usages";
             mDiagnostics.SetVulkanPresentationFallback(
-                Oot3dVulkanPresentationFallbackReason::
-                    NriCreationFailed,
-                mNriSwapchain.UnavailableReason());
-            SPDLOG_WARN(
-                "OOT3D NRI swapchain creation failed; using Vulkan: {}",
-                mNriSwapchain.UnavailableReason());
+                Oot3dVulkanPresentationFallbackReason::NriCreationFailed, std::string(reason));
+            SPDLOG_WARN("OOT3D using the Vulkan swapchain: {}", reason);
         }
         VkSemaphoreCreateInfo semaphoreInfo{
             VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -1298,10 +1302,7 @@ void GfxRenderingAPIVulkan::CreateSwapchainResources() {
         createInfo.imageArrayLayers = 1;
         // Scanout draws into a color attachment. Only diagnostic readbacks
         // require swapchain transfer usage, which is not universal.
-        const auto usage = support.Capabilities.supportedUsageFlags;
-        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                (usage & (VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                          VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (supportedUsage & transferUsage);
         mSwapchainCanReadBack = (createInfo.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U;
         const uint32_t queueFamilies[] = {
             mGraphicsQueueFamily, mPresentQueueFamily};

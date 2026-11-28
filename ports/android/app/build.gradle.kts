@@ -10,6 +10,7 @@ dependencies {
     // The Azahar touch overlay (ports/android/controls).
     implementation(project(":controls"))
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
 // Native compilation is a separate incremental build, never a Gradle side effect.

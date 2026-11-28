@@ -18,7 +18,12 @@ import java.util.zip.ZipOutputStream;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 29, manifest = Config.NONE)
 public class TurnipDriverTest {
     @Rule public TemporaryFolder temporary = new TemporaryFolder();
 
